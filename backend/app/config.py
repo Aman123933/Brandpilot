@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     DATABASE_URL: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
-    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
     SECRET_KEY: str = "brandpilot-insecure-dev-secret-key-change-in-prod-12345"
     PUBLIC_BASE_URL: str = "http://localhost:8000"
 

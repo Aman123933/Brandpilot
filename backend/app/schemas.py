@@ -169,3 +169,66 @@ class HealthResponse(BaseModel):
     version: str = "1.0.0"
     database: str = "connected"
     timestamp: datetime
+
+
+class FindingOut(BaseModel):
+    id: int
+    asset_id: int
+    revision: int
+    kind: str
+    severity: str
+    quote: str
+    start_offset: int
+    end_offset: int
+    explanation: str
+    suggestion: Optional[str] = None
+    source_type: str
+    source_ref: Optional[int] = None
+    status: str
+    origin: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FindingUpdate(BaseModel):
+    status: str = Field(..., pattern=r"^(accepted|dismissed)$")
+
+
+class FindingPatchResponse(BaseModel):
+    finding: FindingOut
+    new_revision: Optional[int] = None
+    new_body: Optional[str] = None
+    new_findings_count: Optional[int] = None
+
+
+class AuditGroupedFindings(BaseModel):
+    high: List[FindingOut] = Field(default_factory=list)
+    medium: List[FindingOut] = Field(default_factory=list)
+    low: List[FindingOut] = Field(default_factory=list)
+
+
+class AuditResponse(BaseModel):
+    asset_id: int
+    revision: int
+    ai_available: bool
+    total_findings: int
+    findings: AuditGroupedFindings
+
+
+class RedTeamFinding(BaseModel):
+    persona: str  # critical_journalist | competitor | skeptical_customer
+    category: str  # misleading | unsupported_promise | reputational | ambiguity
+    severity: str  # high | medium | low
+    quote: str
+    start_offset: Optional[int] = None
+    end_offset: Optional[int] = None
+    why: str
+    label: str = "potential risks"
+
+
+class RedTeamResponse(BaseModel):
+    asset_id: int
+    revision: int
+    ai_available: bool
+    risks: List[RedTeamFinding] = Field(default_factory=list)

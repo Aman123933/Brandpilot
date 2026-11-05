@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.app.config import settings
 from backend.app.database import engine, Base, SessionLocal
 from backend.app.seed import seed_database
-from backend.app.routers import auth, health, facts, guidelines, assets
+from backend.app.routers import auth, health, facts, guidelines, assets, findings
 
 
 @asynccontextmanager
@@ -38,6 +38,7 @@ app.include_router(auth.router)
 app.include_router(facts.router)
 app.include_router(guidelines.router)
 app.include_router(assets.router)
+app.include_router(findings.router)
 
 
 @app.get("/", tags=["Root"])
