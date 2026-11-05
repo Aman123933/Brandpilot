@@ -1,0 +1,824 @@
+/* Dashboard layout */
+
+.dashboard-shell {
+  min-height: 100vh;
+  display: flex;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.sidebar {
+  width: 250px;
+  min-width: 250px;
+  min-height: 100vh;
+  padding: 30px 24px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  background: #F0EADF;
+}
+
+.wordmark {
+  color: var(--ink);
+  text-decoration: none;
+  font-family: "Fraunces", serif;
+  font-size: 29px;
+  font-weight: 600;
+  letter-spacing: -1.5px;
+}
+
+.wordmark span {
+  color: var(--vermilion);
+}
+
+.sidebar-label {
+  margin-top: 65px;
+  margin-bottom: 18px;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 1.4px;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.nav-item {
+  padding: 12px 13px;
+  text-decoration: none;
+  color: #625E56;
+  font-size: 14px;
+  border-radius: 3px;
+  transition: 0.2s;
+}
+
+.nav-item:hover,
+.nav-item.active {
+  color: var(--ink);
+  background: #E5DCCE;
+}
+
+.sidebar-bottom {
+  margin-top: auto;
+  padding-top: 25px;
+  border-top: 1px solid var(--border);
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.user-avatar {
+  width: 37px;
+  height: 37px;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+  color: white;
+  border-radius: 50%;
+  font-family: "Fraunces", serif;
+}
+
+.user-info strong,
+.user-info span {
+  display: block;
+}
+
+.user-info strong {
+  font-size: 13px;
+}
+
+.user-info span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.logout-button {
+  margin-top: 18px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 5px 0;
+}
+
+.logout-button:hover {
+  color: var(--vermilion);
+}
+
+/* Main dashboard */
+
+.dashboard-main {
+  flex: 1;
+  min-width: 0;
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 42px 55px 70px;
+}
+
+.dashboard-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding-bottom: 30px;
+  border-bottom: 1px solid var(--border);
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+}
+
+.dashboard-topbar h1 {
+  margin: 12px 0 0;
+  font-family: "Fraunces", serif;
+  font-size: clamp(27px, 3vw, 38px);
+  font-weight: 500;
+  letter-spacing: -1px;
+}
+
+.workspace-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--olive);
+}
+
+.dashboard-intro {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 20px;
+  padding: 43px 0 35px;
+}
+
+.dashboard-intro h2 {
+  margin: 11px 0 8px;
+  font-family: "Fraunces", serif;
+  font-size: 35px;
+  font-weight: 500;
+  letter-spacing: -1px;
+}
+
+.dashboard-intro p:not(.eyebrow) {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.dashboard-intro .mono-font {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+/* Statistics */
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.stat-block {
+  padding: 23px 20px 24px 0;
+  border-right: 1px solid var(--border);
+}
+
+.stat-block:not(:first-child) {
+  padding-left: 23px;
+}
+
+.stat-block:last-child {
+  border-right: 0;
+}
+
+.stat-block span {
+  display: block;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.stat-block strong {
+  display: block;
+  margin: 13px 0 5px;
+  font-family: "Fraunces", serif;
+  font-size: 37px;
+  font-weight: 500;
+}
+
+.stat-block small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Data sections */
+
+.dashboard-section {
+  padding-top: 42px;
+  scroll-margin-top: 25px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 15px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.section-heading h2 {
+  margin: 8px 0 0;
+  font-family: "Fraunces", serif;
+  font-size: 26px;
+  font-weight: 500;
+}
+
+.section-heading > span {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+}
+
+.data-list {
+  width: 100%;
+}
+
+.data-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 19px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-row strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.data-row p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+  max-width: 650px;
+}
+
+.record-id {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.empty-message,
+.loading-message {
+  padding: 25px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.dashboard-error {
+  margin-top: 20px;
+  padding: 13px 16px;
+  border-left: 3px solid var(--vermilion);
+  background: #F1E3DA;
+  color: #873A2C;
+  font-size: 13px;
+}
+
+/* Responsive */
+
+@media (max-width: 1000px) {
+  .dashboard-main {
+    padding: 35px 30px 60px;
+  }
+
+  .sidebar {
+    width: 215px;
+    min-width: 215px;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stat-block:nth-child(2) {
+    border-right: 0;
+  }
+
+  .stat-block:nth-child(3),
+  .stat-block:nth-child(4) {
+    border-top: 1px solid var(--border);
+  }
+
+  .stat-block:nth-child(3) {
+    padding-left: 0;
+  }
+}
+
+@media (max-width: 650px) {
+  .dashboard-shell {
+    display: block;
+  }
+
+  .sidebar {
+    width: 100%;
+    min-width: 0;
+    min-height: auto;
+    padding: 18px 20px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar-label,
+  .sidebar-bottom {
+    display: none;
+  }
+
+  .sidebar-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    margin-top: 17px;
+    gap: 5px;
+  }
+
+  .nav-item {
+    white-space: nowrap;
+    font-size: 12px;
+    padding: 9px 10px;
+  }
+
+  .dashboard-main {
+    padding: 25px 20px 50px;
+  }
+
+  .dashboard-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .dashboard-intro {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 30px 0;
+  }
+
+  .dashboard-intro h2 {
+    font-size: 29px;
+  }
+
+  .stat-block {
+    padding: 18px 10px 18px 0;
+  }
+
+  .stat-block:not(:first-child) {
+    padding-left: 12px;
+  }
+
+  .stat-block:nth-child(3) {
+    padding-left: 0;
+  }
+
+  .stat-block strong {
+    font-size: 31px;
+  }
+
+  .stat-block small {
+    font-size: 10px;
+  }
+
+  .data-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 9px;
+  }
+}
+/* Brand facts form */
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.add-fact-button {
+  padding: 10px 15px;
+  border: 1px solid var(--vermilion);
+  background: var(--vermilion);
+  color: white;
+  font-size: 12px;
+  transition: 0.2s;
+}
+
+.add-fact-button:hover {
+  background: #A93624;
+}
+
+.fact-form {
+  margin: 22px 0;
+  padding: 25px;
+  border: 1px solid var(--border);
+  background: #F0EADF;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fact-form h3 {
+  margin: 0 0 12px;
+  font-family: "Fraunces", serif;
+  font-size: 23px;
+  font-weight: 500;
+}
+
+.fact-form label {
+  margin-top: 8px;
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.fact-form input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--border);
+  outline: none;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.fact-form input:focus {
+  border-color: var(--vermilion);
+}
+
+.fact-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 15px;
+}
+
+.fact-form-actions button {
+  padding: 11px 18px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.fact-form-actions button[type="submit"] {
+  border-color: var(--vermilion);
+  background: var(--vermilion);
+  color: white;
+}
+
+.fact-form-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.fact-message {
+  padding: 12px;
+  background: #E9E5D8;
+  color: var(--ink);
+  font-size: 13px;
+}
+/* BRANDPILOT LOGIN PAGE POLISH — appended overrides */
+.login-layout {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(420px, 0.92fr);
+  background: #f6f1e7;
+  color: #1d1b18;
+  overflow: hidden;
+}
+
+.login-layout .brand-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 100vh;
+  padding: clamp(30px, 5vw, 76px);
+  background: #e8d2b5;
+  color: #1d1b18;
+  overflow: hidden;
+}
+
+.login-layout .brand-panel::after {
+  content: "";
+  position: absolute;
+  width: min(42vw, 560px);
+  aspect-ratio: 1;
+  right: -18%;
+  bottom: -22%;
+  border: 1px solid rgba(89, 9, 7, 0.18);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 34px rgba(89, 9, 7, 0.035),
+    0 0 0 72px rgba(89, 9, 7, 0.025),
+    0 0 0 112px rgba(89, 9, 7, 0.018);
+  pointer-events: none;
+}
+
+.login-layout .topbar,
+.login-layout .brand-footer {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.login-layout .wordmark {
+  color: #1d1b18;
+  font-size: 27px;
+  font-weight: 750;
+  letter-spacing: -1.6px;
+  text-decoration: none;
+}
+
+.login-layout .wordmark span {
+  color: #590907;
+}
+
+.login-layout .topbar-note,
+.login-layout .brand-footer {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.7px;
+}
+
+.login-layout .brand-message {
+  position: relative;
+  z-index: 1;
+  max-width: 620px;
+  margin: auto 0;
+  padding: 70px 0;
+}
+
+.login-layout .eyebrow {
+  margin: 0 0 20px;
+  color: #765b47;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 2px;
+}
+
+.login-layout .brand-message h1 {
+  max-width: 600px;
+  margin: 0;
+  color: #1d1b18;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(42px, 5.1vw, 72px);
+  font-weight: 500;
+  line-height: 1.04;
+  letter-spacing: -2.8px;
+}
+
+.login-layout .brand-message > p:last-child {
+  max-width: 410px;
+  margin: 26px 0 0;
+  color: #62564b;
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+.login-layout .brand-footer {
+  color: #765b47;
+}
+
+.login-layout .login-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 100vh;
+  padding: clamp(28px, 6vw, 88px);
+  background: #fbf9f4;
+}
+
+.login-layout .login-content {
+  width: 100%;
+  max-width: 430px;
+  margin: 0 auto;
+}
+
+.login-layout .login-content > .eyebrow {
+  margin-bottom: 14px;
+  color: #8a7662;
+}
+
+.login-layout .login-content h2 {
+  margin: 0;
+  color: #1d1b18;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(32px, 3.4vw, 43px);
+  font-weight: 500;
+  line-height: 1.12;
+  letter-spacing: -1.2px;
+}
+
+.login-layout .login-description {
+  margin: 14px 0 38px;
+  color: #777067;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.login-layout .login-content form {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+
+.login-layout .login-content form label {
+  margin: 0 0 2px;
+  color: #514a42;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 1.6px;
+}
+
+.login-layout .login-content select {
+  width: 100%;
+  min-height: 54px;
+  padding: 0 16px;
+  border: 1px solid #d9d0c4;
+  border-radius: 7px;
+  outline: none;
+  background: #fffefa;
+  color: #29251f;
+  font: inherit;
+  font-size: 14px;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.login-layout .login-content select:focus {
+  border-color: #8b4b3d;
+  box-shadow: 0 0 0 3px rgba(139, 75, 61, 0.12);
+}
+
+.login-layout .primary-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 54px;
+  margin-top: 9px;
+  padding: 0 19px;
+  border: 1px solid #590907;
+  border-radius: 7px;
+  background: #590907;
+  color: #fffaf3;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.login-layout .primary-button:hover:not(:disabled) {
+  background: #741510;
+  transform: translateY(-1px);
+}
+
+.login-layout .primary-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.login-layout .primary-button span {
+  font-size: 19px;
+}
+
+.login-layout .error-message {
+  margin: 2px 0;
+  color: #a12b22;
+  font-size: 13px;
+}
+
+.login-layout .form-message {
+  color: #777067;
+  font-size: 13px;
+}
+
+.login-layout .login-footnote {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 42px;
+  color: #8b8379;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.25px;
+}
+
+.login-layout .login-footnote .status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #687747;
+}
+
+.login-layout .panel-footer {
+  margin-top: 50px;
+  color: #9a9186;
+  font-size: 11px;
+  text-align: center;
+}
+
+@media (max-width: 850px) {
+  .login-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .login-layout .brand-panel {
+    min-height: auto;
+    padding: 28px 7vw 34px;
+  }
+
+  .login-layout .brand-message {
+    padding: 62px 0 42px;
+  }
+
+  .login-layout .brand-message h1 {
+    max-width: 560px;
+    font-size: clamp(39px, 8vw, 58px);
+  }
+
+  .login-layout .brand-footer {
+    padding-top: 10px;
+  }
+
+  .login-layout .login-panel {
+    min-height: auto;
+    padding: 58px 7vw 48px;
+  }
+
+  .login-layout .panel-footer {
+    margin-top: 35px;
+  }
+}
+
+@media (max-width: 480px) {
+  .login-layout .brand-panel {
+    padding: 23px 22px 28px;
+  }
+
+  .login-layout .wordmark {
+    font-size: 24px;
+  }
+
+  .login-layout .topbar-note,
+  .login-layout .brand-footer {
+    font-size: 8px;
+    letter-spacing: 1px;
+  }
+
+  .login-layout .brand-message {
+    padding: 52px 0 35px;
+  }
+
+  .login-layout .brand-message h1 {
+    font-size: 40px;
+    letter-spacing: -1.7px;
+  }
+
+  .login-layout .brand-message > p:last-child {
+    font-size: 13px;
+  }
+
+  .login-layout .login-panel {
+    padding: 48px 22px 38px;
+  }
+}
+
