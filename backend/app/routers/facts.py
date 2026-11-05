@@ -11,9 +11,10 @@ from backend.app.schemas import (
     FactDetailOut,
     FactVersionCreate,
     FactVersionOut,
+    ImpactPreviewResponse,
 )
 from backend.app.auth import get_current_user, require_roles
-from backend.app.services.recall import recall_for_fact_version
+from backend.app.services.recall import recall_for_fact_version, get_fact_impact_preview
 
 router = APIRouter(prefix="/facts", tags=["Facts"])
 
@@ -130,6 +131,32 @@ def get_fact(
     )
 
 
+@router.get("/{fact_id}/impact", response_model=ImpactPreviewResponse)
+def preview_fact_impact(
+    fact_id: int,
+    new_value: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Preview which approved assets will be impacted if this fact is updated,
+    including affected asset titles, owners, passport codes, and matching sentences.
+    No database modifications are made.
+    """
+    fact = (
+        db.query(Fact)
+        .filter(Fact.id == fact_id, Fact.org_id == current_user.org_id)
+        .first()
+    )
+    if not fact:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Fact with ID {fact_id} not found",
+        )
+
+    return get_fact_impact_preview(db, fact_id, new_value, current_user.org_id)
+
+
 @router.post("/{fact_id}/versions", response_model=FactVersionOut, status_code=status.HTTP_201_CREATED)
 def create_fact_version(
     fact_id: int,
@@ -171,9 +198,12 @@ def create_fact_version(
     db.add(new_version)
     db.flush()
 
-    recall_for_fact_version(db, new_version.id)
+    # Trigger recall: marks passports review_required, assets needs_revalidation, notifies owners
+    affected_assets = recall_for_fact_version(db, new_version.id, actor_id=current_user.id)
 
     db.commit()
     db.refresh(new_version)
 
-    return FactVersionOut.model_validate(new_version)
+    out = FactVersionOut.model_validate(new_version)
+    out.affected_assets = affected_assets
+    return out

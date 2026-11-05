@@ -81,6 +81,17 @@ class GuidelineDetailOut(GuidelineOut):
     versions: List[GuidelineVersionOut] = Field(default_factory=list)
 
 
+class ImpactPreviewItem(BaseModel):
+    asset_id: int
+    title: str
+    owner: str
+    passport_code: Optional[str] = None
+    old_value: str
+    new_value: str
+    matching_sentence: str
+    suggested_sentence: Optional[str] = None
+
+
 class FactVersionOut(BaseModel):
     id: int
     fact_id: int
@@ -93,6 +104,7 @@ class FactVersionOut(BaseModel):
     source_note: Optional[str] = None
     created_by: int
     created_at: datetime
+    affected_assets: List[ImpactPreviewItem] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -232,3 +244,105 @@ class RedTeamResponse(BaseModel):
     revision: int
     ai_available: bool
     risks: List[RedTeamFinding] = Field(default_factory=list)
+
+
+class SubmitForReviewResponse(BaseModel):
+    asset_id: int
+    status: str
+    current_revision: int
+    message: str
+    warnings: List[str] = Field(default_factory=list)
+
+
+class ReviewQueueItem(BaseModel):
+    asset_id: int
+    title: str
+    creator_id: int
+    creator_name: str
+    status: str
+    current_revision: int
+    open_findings_count: int
+    high_severity_findings_count: int
+    passport_code: Optional[str] = None
+    passport_status: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class DecisionRequest(BaseModel):
+    decision: str = Field(..., pattern=r"^(approved|rejected|changes_requested)$")
+    comment: Optional[str] = None
+
+
+class DecisionResponse(BaseModel):
+    asset_id: int
+    status: str
+    revision: int
+    decision: str
+    passport_code: Optional[str] = None
+    message: str
+
+
+class PublicPassportOut(BaseModel):
+    code: str
+    asset_title: str
+    status: str
+    approved_at: Optional[datetime] = None
+    reviewer_first_name: Optional[str] = None
+    guideline_version_label: str
+    linked_facts_count: int
+    ai_disclosure: Optional[str] = None
+
+
+class FullPassportOut(BaseModel):
+    code: str
+    asset_id: int
+    asset_title: str
+    asset_status: str
+    status: str
+    approved_at: Optional[datetime] = None
+    approved_by_name: Optional[str] = None
+    ai_disclosure: Optional[str] = None
+    created_at: datetime
+    guideline_version: Optional[Dict[str, Any]] = None
+    referenced_facts: List[Dict[str, Any]] = Field(default_factory=list)
+    revisions: List[AssetRevisionOut] = Field(default_factory=list)
+    approvals: List[Dict[str, Any]] = Field(default_factory=list)
+    activity_log: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class ImpactPreviewResponse(BaseModel):
+    fact_id: int
+    fact_key: str
+    old_value: str
+    new_value: str
+    affected_assets_count: int
+    affected_assets: List[ImpactPreviewItem] = Field(default_factory=list)
+
+
+class NotificationOut(BaseModel):
+    id: int
+    user_id: int
+    message: str
+    asset_id: Optional[int] = None
+    read: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AssetHistoryOut(BaseModel):
+    asset_id: int
+    title: str
+    status: str
+    current_revision: int
+    revisions: List[AssetRevisionOut] = Field(default_factory=list)
+    approvals: List[Dict[str, Any]] = Field(default_factory=list)
+    findings: List[FindingOut] = Field(default_factory=list)
+    activity_logs: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class ExpiryCheckResponse(BaseModel):
+    checked_at: datetime
+    affected_assets_count: int
+    affected_assets: List[ImpactPreviewItem] = Field(default_factory=list)

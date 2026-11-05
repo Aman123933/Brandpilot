@@ -152,8 +152,10 @@ class ContentAsset(Base):
         order_by="desc(AssetRevision.revision)",
     )
     findings = relationship("Finding", back_populates="asset", cascade="all, delete-orphan")
-    approvals = relationship("Approval", back_populates="asset", cascade="all, delete-orphan")
+    approvals = relationship("Approval", back_populates="asset", cascade="all, delete-orphan", order_by="desc(Approval.decided_at)")
     passport = relationship("Passport", back_populates="asset", uselist=False, cascade="all, delete-orphan")
+    fact_links = relationship("AssetFactLink", back_populates="asset", cascade="all, delete-orphan")
+    guideline_links = relationship("AssetGuidelineLink", back_populates="asset", cascade="all, delete-orphan")
 
 
 class AssetRevision(Base):
@@ -217,6 +219,9 @@ class AssetFactLink(Base):
     fact_version_id = Column(Integer, ForeignKey("fact_versions.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
+    asset = relationship("ContentAsset", back_populates="fact_links")
+    fact_version = relationship("FactVersion")
+
     __table_args__ = (
         UniqueConstraint("asset_id", "fact_version_id", name="uq_asset_fact_link"),
     )
@@ -229,6 +234,9 @@ class AssetGuidelineLink(Base):
     asset_id = Column(Integer, ForeignKey("content_assets.id", ondelete="CASCADE"), nullable=False, index=True)
     guideline_version_id = Column(Integer, ForeignKey("guideline_versions.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    asset = relationship("ContentAsset", back_populates="guideline_links")
+    guideline_version = relationship("GuidelineVersion")
 
     __table_args__ = (
         UniqueConstraint("asset_id", "guideline_version_id", name="uq_asset_guideline_link"),

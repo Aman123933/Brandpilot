@@ -11,8 +11,15 @@ from backend.app.models import (
     AssetRevision,
     GuidelineVersion,
     Fact,
+    FactVersion,
     Finding,
     User,
+    Approval,
+    AssetFactLink,
+    AssetGuidelineLink,
+    Passport,
+    Notification,
+    ActivityLog,
 )
 from backend.app.schemas import (
     ContentAssetCreate,
@@ -24,10 +31,14 @@ from backend.app.schemas import (
     AuditGroupedFindings,
     RedTeamResponse,
     RedTeamFinding,
+    SubmitForReviewResponse,
+    DecisionRequest,
+    DecisionResponse,
+    AssetHistoryOut,
 )
 from backend.app.auth import get_current_user, require_roles
 from backend.app.audit.rules import normalize_intake_text, run_deterministic_rules
-from backend.app.audit.gemini import run_gemini_brand_audit, run_gemini_red_team
+from backend.app.audit.gemini import run_gemini_brand_audit, run_gemini_red_team, filter_relevant_facts
 
 router = APIRouter(prefix="/assets", tags=["Assets"])
 
@@ -327,6 +338,19 @@ def audit_asset(
         db.add(finding_obj)
         stored_models.append(finding_obj)
 
+    # Log audit activity
+    db.add(
+        ActivityLog(
+            org_id=asset.org_id,
+            actor_id=current_user.id,
+            action="asset_audited",
+            entity="asset",
+            entity_id=str(asset.id),
+            detail={"revision": asset.current_revision, "total_findings": len(stored_models), "ai_available": ai_available},
+            created_at=now,
+        )
+    )
+
     db.commit()
 
     # Group by severity
@@ -438,3 +462,403 @@ def get_asset_findings(
         .all()
     )
     return [FindingOut.model_validate(f) for f in findings]
+
+
+@router.post("/{asset_id}/submit", response_model=SubmitForReviewResponse)
+def submit_for_review(
+    asset_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("creator", "brand_manager")),
+):
+    """
+    Submits an asset for review (transitions status to in_review).
+    Blocks if the latest revision has never been audited.
+    Warns if high-severity findings are still open.
+    Notifies all reviewers in the organization.
+    """
+    asset = (
+        db.query(ContentAsset)
+        .filter(ContentAsset.id == asset_id, ContentAsset.org_id == current_user.org_id)
+        .first()
+    )
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Content asset with ID {asset_id} not found",
+        )
+
+    # 1. Block if latest revision has never been audited
+    has_audit_findings = (
+        db.query(Finding)
+        .filter(Finding.asset_id == asset.id, Finding.revision == asset.current_revision)
+        .first()
+    )
+    has_audit_log = (
+        db.query(ActivityLog)
+        .filter(
+            ActivityLog.entity == "asset",
+            ActivityLog.entity_id == str(asset.id),
+            ActivityLog.action == "asset_audited",
+        )
+        .first()
+    )
+    if not has_audit_findings and not has_audit_log:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The latest revision must be audited before submission for review.",
+        )
+
+    # 2. Warn if high-severity findings are still open
+    open_high_count = (
+        db.query(Finding)
+        .filter(
+            Finding.asset_id == asset.id,
+            Finding.revision == asset.current_revision,
+            Finding.severity == "high",
+            Finding.status == "open",
+        )
+        .count()
+    )
+    warnings = []
+    if open_high_count > 0:
+        warnings.append(
+            f"Asset has {open_high_count} open high-severity finding(s). Reviewers may request changes or reject."
+        )
+
+    now = datetime.now(timezone.utc)
+    asset.status = "in_review"
+    asset.updated_at = now
+
+    # 3. Notify reviewers in the organization
+    reviewers = (
+        db.query(User)
+        .filter(User.org_id == current_user.org_id, User.role == "reviewer")
+        .all()
+    )
+    for reviewer in reviewers:
+        db.add(
+            Notification(
+                user_id=reviewer.id,
+                message=f"Asset '{asset.title}' (rev {asset.current_revision}) submitted for review by {current_user.name}.",
+                asset_id=asset.id,
+                read=False,
+                created_at=now,
+            )
+        )
+
+    # 4. Activity log
+    db.add(
+        ActivityLog(
+            org_id=asset.org_id,
+            actor_id=current_user.id,
+            action="asset_submitted",
+            entity="asset",
+            entity_id=str(asset.id),
+            detail={"revision": asset.current_revision, "warnings": warnings},
+            created_at=now,
+        )
+    )
+
+    db.commit()
+    db.refresh(asset)
+
+    return SubmitForReviewResponse(
+        asset_id=asset.id,
+        status=asset.status,
+        current_revision=asset.current_revision,
+        message="Asset successfully submitted for review.",
+        warnings=warnings,
+    )
+
+
+@router.post("/{asset_id}/decision", response_model=DecisionResponse)
+def decide_asset(
+    asset_id: int,
+    payload: DecisionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Reviewer decision on an asset: approved, rejected, or changes_requested.
+    - Creators cannot approve their own content (403).
+    - Reviewer only (403 for non-reviewers).
+    - Comments are required for reject / changes_requested.
+    - On approval: snapshots dependency map (AssetFactLink & AssetGuidelineLink) and creates/updates Passport with short unique code.
+    """
+    asset = (
+        db.query(ContentAsset)
+        .filter(ContentAsset.id == asset_id, ContentAsset.org_id == current_user.org_id)
+        .first()
+    )
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Content asset with ID {asset_id} not found",
+        )
+
+    # Creators cannot approve their own content (403)
+    if current_user.id == asset.creator_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Creators cannot approve their own content",
+        )
+
+    # Reviewer only
+    if current_user.role != "reviewer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Role 'reviewer' required to record review decisions",
+        )
+
+    # Comment is required for reject / changes_requested
+    if payload.decision in ("rejected", "changes_requested") and not (payload.comment and payload.comment.strip()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A comment is required when rejecting or requesting changes.",
+        )
+
+    now = datetime.now(timezone.utc)
+
+    # Record Approval row
+    approval = Approval(
+        asset_id=asset.id,
+        revision=asset.current_revision,
+        reviewer_id=current_user.id,
+        decision=payload.decision,
+        comment=payload.comment,
+        decided_at=now,
+    )
+    db.add(approval)
+
+    passport_code = None
+
+    if payload.decision == "approved":
+        asset.status = "approved"
+        asset.updated_at = now
+
+        # 1. Snapshot dependency map: AssetFactLink for every FactVersion used on this revision
+        org_facts = db.query(Fact).filter(Fact.org_id == current_user.org_id).all()
+        relevant_pairs = filter_relevant_facts(asset.body, org_facts)
+        finding_fact_ids = {
+            f.source_ref
+            for f in asset.findings
+            if f.revision == asset.current_revision and f.source_type == "fact" and f.source_ref
+        }
+        fact_version_ids_to_link = {fv.id for _, fv in relevant_pairs} | finding_fact_ids
+
+        for fv_id in fact_version_ids_to_link:
+            fv = db.query(FactVersion).filter(FactVersion.id == fv_id).first()
+            if not fv:
+                continue
+
+            # Clear older links for this same fact
+            old_links = (
+                db.query(AssetFactLink)
+                .join(FactVersion, AssetFactLink.fact_version_id == FactVersion.id)
+                .filter(AssetFactLink.asset_id == asset.id, FactVersion.fact_id == fv.fact_id)
+                .all()
+            )
+            for ol in old_links:
+                if ol.fact_version_id != fv_id:
+                    db.delete(ol)
+
+            # Link new/current version idempotently
+            existing_link = (
+                db.query(AssetFactLink)
+                .filter(AssetFactLink.asset_id == asset.id, AssetFactLink.fact_version_id == fv_id)
+                .first()
+            )
+            if not existing_link:
+                db.add(AssetFactLink(asset_id=asset.id, fact_version_id=fv_id, created_at=now))
+
+        # 2. AssetGuidelineLink for active guideline version
+        active_gv = (
+            db.query(GuidelineVersion)
+            .join(GuidelineVersion.guideline)
+            .filter(GuidelineVersion.is_active == True)
+            .first()
+        )
+        if active_gv:
+            existing_g_link = (
+                db.query(AssetGuidelineLink)
+                .filter(
+                    AssetGuidelineLink.asset_id == asset.id,
+                    AssetGuidelineLink.guideline_version_id == active_gv.id,
+                )
+                .first()
+            )
+            if not existing_g_link:
+                db.add(AssetGuidelineLink(asset_id=asset.id, guideline_version_id=active_gv.id, created_at=now))
+
+        # 3. Create or update Passport (idempotent, never duplicate)
+        existing_passport = db.query(Passport).filter(Passport.asset_id == asset.id).first()
+        has_ai = any(f.origin == "ai" for f in asset.findings if f.revision == asset.current_revision)
+        ai_disclosure = (
+            "Rule checks; Gemini analysis (external service) used for tone suggestions and risk analysis"
+            if has_ai
+            else "Deterministic rule checks only; no external AI services used"
+        )
+
+        if existing_passport:
+            passport = existing_passport
+            passport.status = "valid"
+            passport.approved_by = current_user.id
+            passport.approved_at = now
+            passport.ai_disclosure = ai_disclosure
+            passport_code = passport.id
+        else:
+            import secrets
+            chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+            while True:
+                code = "BP-" + "".join(secrets.choice(chars) for _ in range(4)) + "-" + "".join(secrets.choice(chars) for _ in range(2))
+                if not db.query(Passport).filter(Passport.id == code).first():
+                    break
+            passport = Passport(
+                id=code,
+                asset_id=asset.id,
+                status="valid",
+                approved_by=current_user.id,
+                approved_at=now,
+                ai_disclosure=ai_disclosure,
+                created_at=now,
+            )
+            db.add(passport)
+            passport_code = code
+
+        # Notify creator
+        db.add(
+            Notification(
+                user_id=asset.creator_id,
+                message=f"Asset '{asset.title}' was approved by {current_user.name}.",
+                asset_id=asset.id,
+                read=False,
+                created_at=now,
+            )
+        )
+
+    elif payload.decision == "changes_requested":
+        asset.status = "changes_requested"
+        asset.updated_at = now
+        db.add(
+            Notification(
+                user_id=asset.creator_id,
+                message=f"Changes requested on '{asset.title}' by {current_user.name}: {payload.comment}",
+                asset_id=asset.id,
+                read=False,
+                created_at=now,
+            )
+        )
+
+    elif payload.decision == "rejected":
+        asset.status = "rejected"
+        asset.updated_at = now
+        db.add(
+            Notification(
+                user_id=asset.creator_id,
+                message=f"Asset '{asset.title}' was rejected by {current_user.name}: {payload.comment}",
+                asset_id=asset.id,
+                read=False,
+                created_at=now,
+            )
+        )
+
+    # Activity Log
+    db.add(
+        ActivityLog(
+            org_id=asset.org_id,
+            actor_id=current_user.id,
+            action=f"asset_{payload.decision}",
+            entity="asset",
+            entity_id=str(asset.id),
+            detail={
+                "revision": asset.current_revision,
+                "decision": payload.decision,
+                "comment": payload.comment,
+                "passport_code": passport_code,
+            },
+            created_at=now,
+        )
+    )
+
+    db.commit()
+
+    return DecisionResponse(
+        asset_id=asset.id,
+        status=asset.status,
+        revision=asset.current_revision,
+        decision=payload.decision,
+        passport_code=passport_code,
+        message=f"Decision '{payload.decision}' successfully recorded.",
+    )
+
+
+@router.get("/{asset_id}/history", response_model=AssetHistoryOut)
+def get_asset_history(
+    asset_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Chronological history of revisions, approvals, findings, and activity for an asset."""
+    asset = (
+        db.query(ContentAsset)
+        .filter(ContentAsset.id == asset_id, ContentAsset.org_id == current_user.org_id)
+        .first()
+    )
+    if not asset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Content asset with ID {asset_id} not found",
+        )
+
+    revisions_out = [
+        AssetRevisionOut.model_validate(r)
+        for r in sorted(asset.revisions, key=lambda x: x.revision)
+    ]
+
+    approvals_data = []
+    for appr in asset.approvals:
+        reviewer_name = appr.reviewer.name if appr.reviewer else f"User {appr.reviewer_id}"
+        approvals_data.append({
+            "id": appr.id,
+            "revision": appr.revision,
+            "reviewer_id": appr.reviewer_id,
+            "reviewer_name": reviewer_name,
+            "decision": appr.decision,
+            "comment": appr.comment,
+            "decided_at": appr.decided_at.isoformat(),
+        })
+
+    findings_out = [FindingOut.model_validate(f) for f in asset.findings]
+
+    activity_logs = (
+        db.query(ActivityLog)
+        .filter(
+            ActivityLog.org_id == current_user.org_id,
+            ActivityLog.entity == "asset",
+            ActivityLog.entity_id == str(asset.id),
+        )
+        .order_by(ActivityLog.created_at.asc())
+        .all()
+    )
+    activities_data = []
+    for log in activity_logs:
+        actor_name = log.actor.name if log.actor else "System"
+        activities_data.append({
+            "id": log.id,
+            "action": log.action,
+            "actor_id": log.actor_id,
+            "actor_name": actor_name,
+            "detail": log.detail,
+            "created_at": log.created_at.isoformat(),
+        })
+
+    return AssetHistoryOut(
+        asset_id=asset.id,
+        title=asset.title,
+        status=asset.status,
+        current_revision=asset.current_revision,
+        revisions=revisions_out,
+        approvals=approvals_data,
+        findings=findings_out,
+        activity_logs=activities_data,
+    )

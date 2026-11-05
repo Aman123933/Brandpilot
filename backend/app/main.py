@@ -5,7 +5,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.app.config import settings
 from backend.app.database import engine, Base, SessionLocal
 from backend.app.seed import seed_database
-from backend.app.routers import auth, health, facts, guidelines, assets, findings
+from backend.app.services.recall import check_expired_facts
+from backend.app.routers import (
+    auth,
+    health,
+    facts,
+    guidelines,
+    assets,
+    findings,
+    reviews,
+    passports,
+    notifications,
+    admin,
+)
 
 
 @asynccontextmanager
@@ -14,6 +26,7 @@ async def lifespan(app: FastAPI):
 
     with SessionLocal() as db:
         seed_database(db)
+        check_expired_facts(db)
 
     yield
 
@@ -39,6 +52,10 @@ app.include_router(facts.router)
 app.include_router(guidelines.router)
 app.include_router(assets.router)
 app.include_router(findings.router)
+app.include_router(reviews.router)
+app.include_router(passports.router)
+app.include_router(notifications.router)
+app.include_router(admin.router)
 
 
 @app.get("/", tags=["Root"])

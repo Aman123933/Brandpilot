@@ -38,10 +38,22 @@ This document provides complete, accurate API contracts for the BrandPilot backe
 | `POST /assets` | `creator`, `brand_manager` | Submits a new content asset (text draft) |
 | `POST /assets/upload` | `creator`, `brand_manager` | Uploads .txt, .docx, or .pdf (up to 5MB), extracts & normalizes text as revision 1 |
 | `GET /assets/{id}` | Authenticated (All) | Retrieves asset and revision history |
+| `POST /assets/{id}/submit` | `creator`, `brand_manager` | Submits asset for review (requires prior audit, warns on open high findings) |
 | `POST /assets/{id}/audit` | Authenticated (All) | Runs deterministic checks + Gemini Brand Audit, returns findings grouped by severity |
 | `POST /assets/{id}/redteam` | Authenticated (All) | Runs Red Team analysis across 3 personas (Journalist, Competitor, Skeptical Customer) |
 | `GET /assets/{id}/findings` | Authenticated (All) | Retrieves findings for asset, optionally filtered by revision |
 | `PATCH /findings/{id}` | Authenticated (All) | Accepts or dismisses finding; accepting applies text edit as revision +1 and re-runs rules |
+| `GET /reviews/queue` | `reviewer` | Review queue listing assets in review with open-finding counts |
+| `POST /assets/{id}/decision` | `reviewer` | Records review decision (approved/rejected/changes_requested); links facts and creates Passport |
+| `GET /assets/{id}/history` | Authenticated (All) | Full timeline of revisions, approvals, findings, and activity logs |
+| `GET /passports/{code}/public` | Public | Public passport verification (strictly leaks no body text or fact values) |
+| `GET /passports/{code}` | Authenticated (All) | Authenticated full passport view with referenced facts and approval history |
+| `GET /passports/{code}/qr.png` | Public | Dynamic PNG QR code encoding public verification link |
+| `POST /passports/{code}/withdraw` | `brand_manager` | Withdraws and revokes public validity of a passport |
+| `GET /facts/{id}/impact` | Authenticated (All) | Previews affected approved assets before changing a fact value |
+| `POST /admin/run-expiry-check` | `brand_manager` | Runs fact expiry check and triggers recall for expired facts |
+| `GET /notifications` | Authenticated (All) | Lists user notifications |
+| `PATCH /notifications/{id}/read` | Authenticated (All) | Marks notification as read |
 
 ---
 
@@ -870,3 +882,306 @@ When **dismissed**:
   "new_findings_count": null
 }
 ```
+
+---
+
+### 7. Human Decision & Approval Layer
+
+#### `POST /assets/{asset_id}/submit`
+Moves asset from `draft` or `changes_requested` to `in_review`.
+- **Validation**: Blocks (HTTP 400) if the current revision has never been audited.
+- **Warnings**: Generates warning notes if high-severity findings remain open (does not block).
+- **Notifications**: Notifies all reviewers in the organization.
+- **Allowed Roles**: `creator`, `brand_manager`.
+
+**Response `200 OK`**:
+```json
+{
+  "asset_id": 2,
+  "status": "in_review",
+  "current_revision": 2,
+  "message": "Asset successfully submitted for review.",
+  "warnings": [
+    "Asset has 1 open high-severity finding(s). Reviewers may request changes or reject."
+  ]
+}
+```
+
+#### `GET /reviews/queue`
+Lists assets currently pending review (`in_review` or `needs_revalidation`), annotated with open finding counts, high-severity counts, creator metadata, and passport status.
+
+Allowed roles: `reviewer`.
+
+**Response `200 OK`**:
+```json
+[
+  {
+    "asset_id": 2,
+    "title": "Kestrel One Social Media Promo",
+    "creator_id": 2,
+    "creator_name": "Dev Patel",
+    "status": "in_review",
+    "current_revision": 2,
+    "open_findings_count": 0,
+    "high_severity_findings_count": 0,
+    "passport_code": null,
+    "passport_status": null,
+    "created_at": "2026-11-05T12:00:00Z",
+    "updated_at": "2026-11-05T12:15:00Z"
+  }
+]
+```
+
+#### `POST /assets/{asset_id}/decision`
+Records a reviewer's decision on an asset (`approved`, `rejected`, or `changes_requested`).
+- **Restrictions**: Creators cannot approve their own content (HTTP 403). Comments are required when rejecting or requesting changes.
+- **On Approval**: In one atomic transaction:
+  - Snapshots `AssetFactLink` for all referenced/evaluated fact versions and `AssetGuidelineLink` for active guidelines.
+  - Creates or restores the `Passport` with short public code (e.g. `BP-28XH-T5`), `status = "valid"`, and verified `ai_disclosure`. Approving twice is idempotent and does not create duplicate passports.
+  - Updates asset status to `approved`.
+  - Notifies creator and records approval & activity log rows.
+
+Allowed roles: `reviewer`.
+
+**Request Body**:
+```json
+{
+  "decision": "approved",
+  "comment": "Complies with brand standards. Approved for launch."
+}
+```
+
+**Response `200 OK`**:
+```json
+{
+  "asset_id": 2,
+  "status": "approved",
+  "revision": 2,
+  "decision": "approved",
+  "passport_code": "BP-28XH-T5",
+  "message": "Decision 'approved' successfully recorded."
+}
+```
+
+#### `GET /assets/{asset_id}/history`
+Returns the full chronological history for an asset including all revisions, reviewer decisions, finding logs, and activity events.
+
+**Response `200 OK`**:
+```json
+{
+  "asset_id": 2,
+  "title": "Kestrel One Social Media Promo",
+  "status": "approved",
+  "current_revision": 2,
+  "revisions": [
+    {
+      "id": 2,
+      "asset_id": 2,
+      "revision": 1,
+      "body": "...",
+      "created_at": "2026-11-05T12:00:00Z"
+    },
+    {
+      "id": 5,
+      "asset_id": 2,
+      "revision": 2,
+      "body": "...",
+      "created_at": "2026-11-05T12:10:00Z"
+    }
+  ],
+  "approvals": [
+    {
+      "id": 1,
+      "revision": 2,
+      "reviewer_id": 3,
+      "reviewer_name": "Sana Miller",
+      "decision": "approved",
+      "comment": "Complies with brand standards. Approved for launch.",
+      "decided_at": "2026-11-05T12:20:00Z"
+    }
+  ],
+  "findings": [],
+  "activity_logs": [
+    {
+      "id": 1,
+      "action": "asset_submitted",
+      "actor_id": 2,
+      "actor_name": "Dev Patel",
+      "detail": { "revision": 2, "warnings": [] },
+      "created_at": "2026-11-05T12:15:00Z"
+    },
+    {
+      "id": 2,
+      "action": "asset_approved",
+      "actor_id": 3,
+      "actor_name": "Sana Miller",
+      "detail": { "revision": 2, "decision": "approved", "passport_code": "BP-28XH-T5" },
+      "created_at": "2026-11-05T12:20:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### 8. Passport Verification & QR Codes
+
+#### `GET /passports/{code}/public`
+Public verification endpoint requiring **NO authentication**.
+Guarantees privacy: strictly leaks NO raw body text and NO fact values.
+
+**Response `200 OK`**:
+```json
+{
+  "code": "BP-28XH-T5",
+  "asset_title": "Kestrel One Social Media Promo",
+  "status": "valid",
+  "approved_at": "2026-11-05T12:20:00Z",
+  "reviewer_first_name": "Sana",
+  "guideline_version_label": "Kestrel Voice & Claims v1",
+  "linked_facts_count": 4,
+  "ai_disclosure": "Deterministic rule checks only; no external AI services used"
+}
+```
+
+#### `GET /passports/{code}`
+Authenticated full passport view returning complete provenance: referenced facts with values/units/dates, guideline version rules, full revision history, approval comments, and activity audit trails.
+
+**Response `200 OK`**:
+```json
+{
+  "code": "BP-28XH-T5",
+  "asset_id": 2,
+  "asset_title": "Kestrel One Social Media Promo",
+  "asset_status": "approved",
+  "status": "valid",
+  "approved_at": "2026-11-05T12:20:00Z",
+  "approved_by_name": "Sana Miller",
+  "ai_disclosure": "Deterministic rule checks only; no external AI services used",
+  "created_at": "2026-11-05T12:20:00Z",
+  "guideline_version": {
+    "id": 1,
+    "version": 1,
+    "title": "Kestrel Voice & Claims",
+    "rules": { ... }
+  },
+  "referenced_facts": [
+    {
+      "fact_id": 1,
+      "fact_key": "battery_life_hours",
+      "version": 1,
+      "value": "24",
+      "unit": "hours",
+      "is_current": true
+    }
+  ],
+  "revisions": [ ... ],
+  "approvals": [ ... ],
+  "activity_log": [ ... ]
+}
+```
+
+#### `GET /passports/{code}/qr.png`
+Generates and serves a high-resolution PNG QR code encoding `{PUBLIC_BASE_URL}/verify/{code}`.
+
+**Headers**:
+```http
+Content-Type: image/png
+```
+
+#### `POST /passports/{code}/withdraw`
+Revokes public passport validity (`status = "withdrawn"`) and marks the asset `rejected`.
+
+Allowed roles: `brand_manager`.
+
+**Response `200 OK`**: Returns updated `PublicPassportOut` with `status: "withdrawn"`.
+
+---
+
+### 9. Fact Recall, Impact Preview & Expiry
+
+#### `GET /facts/{fact_id}/impact?new_value={value}`
+Preview endpoint with **NO database side-effects**. Finds all approved assets currently linked to older or current versions of the fact via `AssetFactLink`, and returns the matching sentence and suggested rewrite.
+
+**Response `200 OK`**:
+```json
+{
+  "fact_id": 4,
+  "fact_key": "return_window_days",
+  "old_value": "30",
+  "new_value": "14",
+  "affected_assets_count": 1,
+  "affected_assets": [
+    {
+      "asset_id": 2,
+      "title": "Kestrel One Social Media Promo",
+      "owner": "Dev Patel",
+      "passport_code": "BP-28XH-T5",
+      "old_value": "30",
+      "new_value": "14",
+      "matching_sentence": "Guaranteed perfection backed by our 30-day return window.",
+      "suggested_sentence": "Guaranteed perfection backed by our 14-day return window."
+    }
+  ]
+}
+```
+
+#### `POST /facts/{fact_id}/versions` (Recall Execution)
+When a brand manager creates a new version of a fact:
+- Finds every approved asset linked to older versions of that fact.
+- Transitions passports to `status: "review_required"`.
+- Transitions assets to `status: "needs_revalidation"`.
+- Dispatches in-app `Notification`s to asset creators.
+- Records `ActivityLog` entries.
+- Returns the new `FactVersionOut` with the list of `affected_assets`.
+
+#### `POST /admin/run-expiry-check`
+Runs automated check for facts whose `valid_until` timestamp has passed (`valid_until < now`). Recalls all approved assets and sets passports to `review_required`. Also automatically runs on server startup.
+
+Allowed roles: `brand_manager`.
+
+**Response `200 OK`**:
+```json
+{
+  "checked_at": "2026-11-05T12:30:00Z",
+  "affected_assets_count": 1,
+  "affected_assets": [
+    {
+      "asset_id": 1,
+      "title": "Kestrel One Launch Ad Copy",
+      "owner": "Dev Patel",
+      "passport_code": "BP-10AK-8Z",
+      "old_value": "30",
+      "new_value": "[EXPIRED]",
+      "matching_sentence": "Enjoy peace of mind with our 12-month warranty and 30-day return window.",
+      "suggested_sentence": null
+    }
+  ]
+}
+```
+
+---
+
+### 10. Notifications
+
+#### `GET /notifications`
+Lists notifications for the authenticated user ordered newest first.
+
+**Response `200 OK`**:
+```json
+[
+  {
+    "id": 1,
+    "user_id": 2,
+    "message": "Fact 'return_window_days' updated from '30' to '14'. Your approved asset 'Kestrel One Social Media Promo' requires revalidation.",
+    "asset_id": 2,
+    "read": false,
+    "created_at": "2026-11-05T12:25:00Z"
+  }
+]
+```
+
+#### `PATCH /notifications/{id}/read`
+Marks a notification as read (`read = true`).
+
+**Response `200 OK`**: Returns updated `NotificationOut`.
