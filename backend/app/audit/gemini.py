@@ -96,35 +96,82 @@ def _build_redteam_cache_key(text: str) -> str:
 
 
 def _is_retryable_error(exc: Exception) -> bool:
-    """Check if the error is 429 rate limit or 5xx server error."""
+    """Check if the error is 503, 429, or timeout."""
+    if isinstance(exc, (FutureTimeoutError, TimeoutError)):
+        return True
     msg = str(exc).lower()
-    return any(code in msg for code in ["429", "resource_exhausted", "500", "502", "503", "504", "deadline_exceeded"])
+    return any(code in msg for code in [
+        "503",
+        "unavailable",
+        "429",
+        "resource_exhausted",
+        "rate limit",
+        "500",
+        "502",
+        "504",
+        "deadline_exceeded",
+        "timed out",
+        "timeout",
+    ])
 
 
-def _call_gemini_with_retry(fn, timeout_seconds: float = 25.0):
-    """Execute fn with 25s timeout and retry once on 429/5xx with backoff."""
-    last_exc = None
-    for attempt in range(2):
-        executor = ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(fn)
-        try:
-            return future.result(timeout=timeout_seconds)
-        except FutureTimeoutError as te:
-            last_exc = te
-            logger.warning(f"Gemini call timed out after {timeout_seconds}s (attempt {attempt + 1})")
-        except Exception as exc:
-            last_exc = exc
-            logger.warning(f"Gemini error (attempt {attempt + 1}): {exc}")
-            if not _is_retryable_error(exc) or attempt == 1:
-                raise exc
-        finally:
-            executor.shutdown(wait=False)
+def _execute_model_call(fn, model_name: str, timeout_seconds: float = 15.0):
+    import inspect
+    executor = ThreadPoolExecutor(max_workers=1)
+    sig = inspect.signature(fn)
+    call_args = (model_name,) if len(sig.parameters) > 0 else ()
+    future = executor.submit(fn, *call_args)
+    try:
+        return future.result(timeout=timeout_seconds)
+    except FutureTimeoutError as te:
+        logger.warning(f"Gemini call with model '{model_name}' timed out after {timeout_seconds}s")
+        raise te
+    except Exception as exc:
+        logger.warning(f"Gemini error with model '{model_name}': {exc}")
+        raise exc
+    finally:
+        executor.shutdown(wait=False)
 
-        # Exponential backoff before retry
-        if attempt == 0:
-            time.sleep(2.0)
 
-    raise last_exc
+def _call_gemini_with_fallback(fn, timeout_seconds: float = 15.0) -> Tuple[Any, str]:
+    """
+    Execute fn(model_name) with a per-call timeout (default 15s).
+    On a 503/429/timeout from the main model, retry once on the next model in the fallback list before giving up.
+    Log which model answered.
+    Returns (result, answered_model).
+    """
+    main_model = settings.GEMINI_MODEL
+    fallback_models = [m for m in settings.fallback_models_list if m and m != main_model]
+
+    # Attempt 1: Main model
+    try:
+        result = _execute_model_call(fn, main_model, timeout_seconds=timeout_seconds)
+        logger.info(f"Gemini model '{main_model}' answered.")
+        return result, main_model
+    except Exception as exc:
+        if not _is_retryable_error(exc) or not fallback_models:
+            raise exc
+
+        fallback_model = fallback_models[0]
+        logger.warning(
+            f"Main Gemini model '{main_model}' failed with retryable error: {exc}. "
+            f"Retrying once on fallback model '{fallback_model}'..."
+        )
+
+    # Attempt 2: Next model in fallback list
+    try:
+        result = _execute_model_call(fn, fallback_model, timeout_seconds=timeout_seconds)
+        logger.info(f"Gemini model '{fallback_model}' answered.")
+        return result, fallback_model
+    except Exception as exc:
+        logger.warning(f"Fallback Gemini model '{fallback_model}' failed: {exc}")
+        raise exc
+
+
+def _call_gemini_with_retry(fn, timeout_seconds: float = 15.0):
+    """Backwards compatible alias for _call_gemini_with_fallback."""
+    res, _ = _call_gemini_with_fallback(fn, timeout_seconds=timeout_seconds)
+    return res
 
 
 def validate_gemini_findings(
@@ -228,8 +275,13 @@ def run_gemini_brand_audit(
     # Build facts context string
     facts_lines = []
     for f, fv in relevant_pairs:
-        unit_str = f" {fv.unit}" if fv.unit else ""
-        facts_lines.append(f"- Fact ID {fv.id}: {f.key} = {fv.value}{unit_str} (Source: {fv.source_note or 'Internal'})")
+        val_str = str(fv.value)
+        unit_str = (
+            f" {fv.unit}"
+            if fv.unit and not val_str.lower().endswith(str(fv.unit).lower())
+            else ""
+        )
+        facts_lines.append(f"- Fact ID {fv.id}: {f.key} = {val_str}{unit_str} (Source: {fv.source_note or 'Internal'})")
     facts_context = "\n".join(facts_lines) if facts_lines else "None provided."
 
     # Build guideline context
@@ -245,12 +297,11 @@ def run_gemini_brand_audit(
         facts_context=facts_context,
     )
 
-    def _execute():
+    def _execute(model_name: str):
         from google import genai
         from google.genai import types
 
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        model_name = settings.GEMINI_MODEL
         config = types.GenerateContentConfig(
             system_instruction=BRAND_AUDIT_SYSTEM_PROMPT,
             response_mime_type="application/json",
@@ -265,7 +316,7 @@ def run_gemini_brand_audit(
         return response.text
 
     try:
-        raw_text = _call_gemini_with_retry(_execute, timeout_seconds=25.0)
+        raw_text, answered_model = _call_gemini_with_fallback(_execute, timeout_seconds=15.0)
         parsed = json.loads(raw_text)
         raw_findings = parsed.get("findings", [])
         validated = validate_gemini_findings(raw_findings, text, valid_guideline_id, valid_fact_ids)
@@ -292,12 +343,11 @@ def run_gemini_red_team(text: str) -> Tuple[List[Dict[str, Any]], bool]:
 
     user_prompt = RED_TEAM_USER_TEMPLATE.format(content=text)
 
-    def _execute():
+    def _execute(model_name: str):
         from google import genai
         from google.genai import types
 
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        model_name = settings.GEMINI_MODEL
         config = types.GenerateContentConfig(
             system_instruction=RED_TEAM_SYSTEM_PROMPT,
             response_mime_type="application/json",
@@ -312,7 +362,7 @@ def run_gemini_red_team(text: str) -> Tuple[List[Dict[str, Any]], bool]:
         return response.text
 
     try:
-        raw_text = _call_gemini_with_retry(_execute, timeout_seconds=25.0)
+        raw_text, answered_model = _call_gemini_with_fallback(_execute, timeout_seconds=15.0)
         parsed = json.loads(raw_text)
         raw_risks = parsed.get("risks", [])
 

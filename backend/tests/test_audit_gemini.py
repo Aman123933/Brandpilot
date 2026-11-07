@@ -1,4 +1,6 @@
 import json
+import logging
+from concurrent.futures import TimeoutError as FutureTimeoutError
 import pytest
 from unittest.mock import patch, MagicMock
 from sqlalchemy.orm import Session
@@ -257,3 +259,111 @@ def test_mocked_gemini_red_team_personas():
             for r in risks:
                 assert r["label"] == "potential risks"
                 assert "false" not in r["why"].lower() or "unverified" in r["why"].lower()
+
+
+def test_gemini_fallback_on_503(db_session: Session, caplog):
+    asset = db_session.query(ContentAsset).first()
+    guideline_v = db_session.query(GuidelineVersion).first()
+    facts = db_session.query(Fact).all()
+
+    models_called = []
+    success_json = json.dumps({"findings": []})
+
+    def mock_generate(*args, **kwargs):
+        model = kwargs.get("model")
+        models_called.append(model)
+        if len(models_called) == 1:
+            raise Exception("503 Service Unavailable: High load")
+        return MagicMock(text=success_json)
+
+    with patch.object(settings, "GEMINI_API_KEY", "mock-test-key"):
+        with patch.object(settings, "GEMINI_MODEL", "gemini-2.5-flash"):
+            with patch.object(settings, "GEMINI_FALLBACK_MODELS", "gemini-2.5-flash-lite"):
+                with patch("google.genai.Client") as mock_client_cls:
+                    mock_client = MagicMock()
+                    mock_client_cls.return_value = mock_client
+                    mock_client.models.generate_content.side_effect = mock_generate
+
+                    with caplog.at_level(logging.INFO, logger="brandpilot.audit.gemini"):
+                        findings, ai_available = run_gemini_brand_audit(asset.body, guideline_v, facts)
+                        assert ai_available is True
+                        assert models_called == ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+                        assert any("Gemini model 'gemini-2.5-flash-lite' answered" in r.message for r in caplog.records)
+
+
+def test_gemini_fallback_on_timeout(db_session: Session, caplog):
+    asset = db_session.query(ContentAsset).first()
+    guideline_v = db_session.query(GuidelineVersion).first()
+    facts = db_session.query(Fact).all()
+
+    models_called = []
+    success_json = json.dumps({"findings": []})
+
+    def mock_generate(*args, **kwargs):
+        model = kwargs.get("model")
+        models_called.append(model)
+        if len(models_called) == 1:
+            raise FutureTimeoutError("Call timed out after 15s")
+        return MagicMock(text=success_json)
+
+    with patch.object(settings, "GEMINI_API_KEY", "mock-test-key"):
+        with patch.object(settings, "GEMINI_MODEL", "gemini-2.5-flash"):
+            with patch.object(settings, "GEMINI_FALLBACK_MODELS", "gemini-2.5-flash-lite"):
+                with patch("google.genai.Client") as mock_client_cls:
+                    mock_client = MagicMock()
+                    mock_client_cls.return_value = mock_client
+                    mock_client.models.generate_content.side_effect = mock_generate
+
+                    with caplog.at_level(logging.INFO, logger="brandpilot.audit.gemini"):
+                        findings, ai_available = run_gemini_brand_audit(asset.body, guideline_v, facts)
+                        assert ai_available is True
+                        assert models_called == ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+                        assert any("Gemini model 'gemini-2.5-flash-lite' answered" in r.message for r in caplog.records)
+
+
+def test_gemini_no_retry_on_400_invalid_argument(db_session: Session):
+    asset = db_session.query(ContentAsset).first()
+    guideline_v = db_session.query(GuidelineVersion).first()
+    facts = db_session.query(Fact).all()
+
+    models_called = []
+
+    def mock_generate(*args, **kwargs):
+        models_called.append(kwargs.get("model"))
+        raise Exception("400 INVALID_ARGUMENT: Bad model configuration")
+
+    with patch.object(settings, "GEMINI_API_KEY", "mock-test-key"):
+        with patch.object(settings, "GEMINI_MODEL", "gemini-2.5-flash"):
+            with patch.object(settings, "GEMINI_FALLBACK_MODELS", "gemini-2.5-flash-lite"):
+                with patch("google.genai.Client") as mock_client_cls:
+                    mock_client = MagicMock()
+                    mock_client_cls.return_value = mock_client
+                    mock_client.models.generate_content.side_effect = mock_generate
+
+                    findings, ai_available = run_gemini_brand_audit(asset.body, guideline_v, facts)
+                    assert ai_available is False
+                    assert len(findings) == 0
+                    assert models_called == ["gemini-2.5-flash"], "Non-retryable 400 error should not invoke fallback"
+
+
+def test_gemini_red_team_fallback_and_ai_unavailable():
+    text = "Kestrel One delivers unbelievable sound."
+    models_called = []
+
+    def mock_generate(*args, **kwargs):
+        models_called.append(kwargs.get("model"))
+        raise Exception("503 Service Unavailable")
+
+    with patch.object(settings, "GEMINI_API_KEY", "mock-test-key"):
+        with patch.object(settings, "GEMINI_MODEL", "gemini-2.5-flash"):
+            with patch.object(settings, "GEMINI_FALLBACK_MODELS", "gemini-2.5-flash-lite"):
+                with patch("google.genai.Client") as mock_client_cls:
+                    mock_client = MagicMock()
+                    mock_client_cls.return_value = mock_client
+                    mock_client.models.generate_content.side_effect = mock_generate
+
+                    risks, ai_available = run_gemini_red_team(text)
+                    assert ai_available is False
+                    assert len(risks) == 0
+                    assert models_called == ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+

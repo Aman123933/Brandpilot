@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     DATABASE_URL: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
     GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_FALLBACK_MODELS: str = "gemini-2.5-flash-lite"
     SECRET_KEY: str = "brandpilot-insecure-dev-secret-key-change-in-prod-12345"
     PUBLIC_BASE_URL: str = "http://localhost:8000"
 
@@ -14,6 +15,12 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @property
+    def fallback_models_list(self) -> list[str]:
+        if not self.GEMINI_FALLBACK_MODELS:
+            return []
+        return [m.strip() for m in self.GEMINI_FALLBACK_MODELS.split(",") if m.strip()]
 
     @property
     def sqlalchemy_database_url(self) -> str:

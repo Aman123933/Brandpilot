@@ -140,8 +140,9 @@ Copy-Item .env.example .env
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_MODEL=gemini-2.5-flash
+GEMINI_FALLBACK_MODELS=gemini-2.5-flash-lite
 ```
-*(If no key is provided, BrandPilot operates in deterministic rule mode with clear UI status banners).*
+*(If no key is provided, or if models are temporarily unavailable, BrandPilot operates in deterministic rule mode with clear UI status banners and automated fallback).*
 
 ---
 
@@ -202,7 +203,8 @@ BrandPilot supports single-link deployment where FastAPI directly serves the pre
 2. Click **New +** -> **Blueprint**, and select your repository containing `render.yaml`.
 3. Configure the environment variables:
    - `GEMINI_API_KEY`: Your key from Google AI Studio (optional).
-   - `GEMINI_MODEL`: `gemini-2.5-flash` (or your chosen model).
+   - `GEMINI_MODEL`: `gemini-2.5-flash` (or your chosen primary model).
+   - `GEMINI_FALLBACK_MODELS`: `gemini-2.5-flash-lite` (optional fallback list).
    - `DATABASE_URL`: Optional (defaults to zero-setup SQLite; provide Supabase PostgreSQL URL for persistent multi-instance production).
    - `PUBLIC_BASE_URL`: The public URL assigned by Render (e.g., `https://brandpilot.onrender.com`).
 4. Click **Apply Blueprint**. Render will build the multi-stage Docker container and launch the web service on port 8000.
@@ -229,6 +231,7 @@ BrandPilot supports single-link deployment where FastAPI directly serves the pre
    - Secret `GEMINI_API_KEY`: Your Google AI Studio key.
    - Secret `SECRET_KEY`: A secure random secret.
    - Variable `GEMINI_MODEL`: `gemini-2.5-flash`.
+   - Variable `GEMINI_FALLBACK_MODELS`: `gemini-2.5-flash-lite`.
    - Variable `PUBLIC_BASE_URL`: `https://<your-username>-brandpilot.hf.space`.
 
 ---

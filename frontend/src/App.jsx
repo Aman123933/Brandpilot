@@ -8,6 +8,19 @@ const roleLabels = {
   reviewer: 'Reviewer',
 }
 
+function formatFactValue(version) {
+  if (!version || version.value === null || version.value === undefined) return 'N/A'
+  const val = String(version.value).trim()
+  const unit = version.unit ? String(version.unit).trim() : ''
+  if (!unit) return val
+  const valLower = val.toLowerCase()
+  const unitLower = unit.toLowerCase()
+  if (valLower.endsWith(unitLower) || valLower.includes(` ${unitLower}`)) {
+    return val
+  }
+  return `${val} ${unit}`
+}
+
 function App() {
   const [users, setUsers] = useState([])
   const [selectedUser, setSelectedUser] = useState('')
@@ -67,6 +80,7 @@ function App() {
   const [auditMessage, setAuditMessage] = useState('')
   const [auditingAsset, setAuditingAsset] = useState(null)
   const [auditFindings, setAuditFindings] = useState({})
+  const [auditResults, setAuditResults] = useState({})
   const [resolvingFinding, setResolvingFinding] = useState(null)
 
   // Brand Red Team states
@@ -180,6 +194,7 @@ function App() {
     setNotifications([])
 
     setAuditFindings({})
+    setAuditResults({})
     setAuditMessage('')
 
     setRedTeamResults({})
@@ -378,7 +393,7 @@ function App() {
     setAuditMessage('')
 
     try {
-      await apiRequest(`/assets/${assetId}/audit`, {
+      const result = await apiRequest(`/assets/${assetId}/audit`, {
         method: 'POST',
       })
 
@@ -387,6 +402,10 @@ function App() {
         apiRequest(`/assets/${assetId}/findings`),
       ])
 
+      setAuditResults(prev => ({
+        ...prev,
+        [assetId]: result,
+      }))
       setAuditFindings(prev => ({
         ...prev,
         [assetId]: findings,
@@ -859,7 +878,7 @@ function App() {
                         <div>
                           <strong>{fact.key}</strong>
                           <p>
-                            Approved value: <strong>{fact.current_version?.value || 'N/A'} {fact.current_version?.unit || ''}</strong>
+                            Approved value: <strong>{formatFactValue(fact.current_version)}</strong>
                             {' · '}Version: v{fact.current_version?.version || 1}
                           </p>
                           <small style={{ color: 'var(--muted)' }}>
@@ -1284,6 +1303,21 @@ function App() {
                             </p>
                           )}
 
+                          {/* AI UNAVAILABLE BANNER */}
+                          {auditResults[asset.id] && auditResults[asset.id].ai_available === false && (
+                            <div className="ai-unavailable-banner">
+                              <span>AI review unavailable right now. Rule-based checks completed.</span>
+                              <button
+                                type="button"
+                                className="retry-ai-button"
+                                onClick={() => handleAudit(asset.id)}
+                                disabled={auditingAsset === asset.id}
+                              >
+                                {auditingAsset === asset.id ? 'Retrying...' : 'Retry AI analysis'}
+                              </button>
+                            </div>
+                          )}
+
                           {/* AUDIT FINDINGS LIST */}
                           {findings.length > 0 && (
                             <div style={{ background: '#f5f1e8', padding: '12px', borderRadius: '4px', margin: '10px 0' }}>
@@ -1351,7 +1385,11 @@ function App() {
                               <strong style={{ fontSize: '12px', letterSpacing: '1px' }}>
                                 RED-TEAM RISK PERSPECTIVES ({redTeamResults[asset.id].risks?.length || 0})
                               </strong>
-                              {redTeamResults[asset.id].risks?.length === 0 ? (
+                              {redTeamResults[asset.id].ai_available === false ? (
+                                <p style={{ fontSize: '12px', margin: '4px 0', color: '#b45309' }}>
+                                  Red team analysis unavailable, please retry.
+                                </p>
+                              ) : redTeamResults[asset.id].risks?.length === 0 ? (
                                 <p style={{ fontSize: '12px', margin: '4px 0' }}>No risks identified by red-team personas.</p>
                               ) : (
                                 redTeamResults[asset.id].risks.map((risk, idx) => (
