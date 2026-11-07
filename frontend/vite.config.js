@@ -7,6 +7,9 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
+  build: {
+    assetsDir: 'static',
+  },
   server: {
     port: 5173,
   },

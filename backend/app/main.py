@@ -99,9 +99,9 @@ app.include_router(passports.router)
 app.include_router(notifications.router)
 app.include_router(admin.router)
 
-assets_dir = os.path.join(FRONTEND_DIST, "assets")
-if os.path.exists(assets_dir):
-    app.mount("/assets", StaticFiles(directory=assets_dir), name="static-assets")
+static_dir = os.path.join(FRONTEND_DIST, "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
 @app.get("/", tags=["Root"])
@@ -137,6 +137,7 @@ API_ROUTE_PREFIXES = (
     "docs",
     "redoc",
     "openapi.json",
+    "static",
 )
 
 
