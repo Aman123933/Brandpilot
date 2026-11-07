@@ -9,13 +9,10 @@ BrandPilot is an enterprise brand-governance and provenance platform. It prevent
 
 ## Live Deployment
 
-- **Web Application**: `https://<YOUR_RENDER_SERVICE_URL>`
-- **API Documentation**: `https://<YOUR_RENDER_SERVICE_URL>/docs`
-- **Public Verification**: `https://<YOUR_RENDER_SERVICE_URL>/verify/<PASSPORT_CODE>`
+- **Web Application**: `https://brandpilot-3n2y.onrender.com`
+- **API Documentation**: `https://brandpilot-3n2y.onrender.com/docs`
+- **Public Verification**: `https://brandpilot-3n2y.onrender.com/verify/<PASSPORT_CODE>`
 
-*(Replace `<YOUR_RENDER_SERVICE_URL>` with your live Render or Hugging Face Space URL after deployment).*
-
----
 
 ## Table of Contents
 
