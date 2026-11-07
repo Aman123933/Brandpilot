@@ -11,7 +11,7 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
-        value: gemini-2.5-flash
+        value: gemini-3.8-flash
       - key: SECRET_KEY
         generateValue: true
       - key: PUBLIC_BASE_URL
