@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     DATABASE_URL: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
-    GEMINI_MODEL: str = "gemini-3.8-flash"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
     SECRET_KEY: str = "brandpilot-insecure-dev-secret-key-change-in-prod-12345"
     PUBLIC_BASE_URL: str = "http://localhost:8000"
 
@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     def sqlalchemy_database_url(self) -> str:
         if not self.DATABASE_URL or not self.DATABASE_URL.strip():
             return "sqlite:///./brandpilot.db"
-        
+
         url = self.DATABASE_URL.strip()
         if url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql://", 1)

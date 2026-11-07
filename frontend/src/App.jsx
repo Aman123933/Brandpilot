@@ -672,7 +672,7 @@ function App() {
                   disabled={runningExpiry}
                   title="Run automated recall audit to detect published assets relying on outdated facts"
                 >
-                  {runningExpiry ? 'Auditing recall...' : '⚡ Run Recall Audit'}
+                  {runningExpiry ? 'Auditing recall...' : 'Run Recall Audit'}
                 </button>
               )}
               <span className="workspace-status">
@@ -683,6 +683,15 @@ function App() {
           </header>
 
           {error && <div className="dashboard-error">{error}</div>}
+          {loadingDashboard && (
+            <div className="waking-server-banner">
+              <div className="spinner" />
+              <div>
+                <strong>Waking the server (about 30 seconds)...</strong>
+                <div className="waking-subtext">Free-tier hosting spins down when idle. Loading workspace data...</div>
+              </div>
+            </div>
+          )}
           {expiryMessage && <p className="fact-message">{expiryMessage}</p>}
 
           <section className="dashboard-intro">
@@ -1125,7 +1134,7 @@ function App() {
                             setAssetMessage('')
                           }}
                         >
-                          {showUploadForm ? 'Close form' : '📄 Upload file'}
+                          {showUploadForm ? 'Close form' : 'Upload file'}
                         </button>
                       </>
                     )}
@@ -1247,7 +1256,7 @@ function App() {
                               onClick={() => handleAudit(asset.id)}
                               disabled={auditingAsset === asset.id}
                             >
-                              {auditingAsset === asset.id ? 'Auditing...' : '🔍 Pre-flight Audit'}
+                              {auditingAsset === asset.id ? 'Auditing...' : 'Pre-flight Audit'}
                             </button>
 
                             <button
@@ -1255,7 +1264,7 @@ function App() {
                               onClick={() => handleRedTeam(asset.id)}
                               disabled={redTeamingAsset === asset.id}
                             >
-                              {redTeamingAsset === asset.id ? 'Analysing...' : '🛡️ Red-Team Simulation'}
+                              {redTeamingAsset === asset.id ? 'Analysing...' : 'Red-Team Simulation'}
                             </button>
 
                             {currentUser.role !== 'reviewer' && (
@@ -1264,7 +1273,7 @@ function App() {
                                 onClick={() => handleSubmitForReview(asset.id)}
                                 disabled={submittingAsset === asset.id}
                               >
-                                {submittingAsset === asset.id ? 'Submitting...' : '🚀 Submit for Approval'}
+                                {submittingAsset === asset.id ? 'Submitting...' : 'Submit for Approval'}
                               </button>
                             )}
                           </div>
@@ -1501,7 +1510,13 @@ function App() {
             <label htmlFor="demo-user">CONTINUE AS</label>
 
             {loadingUsers ? (
-              <p className="form-message">Loading available accounts...</p>
+              <div className="waking-server-banner">
+                <div className="spinner" />
+                <div>
+                  <strong>Waking the server (about 30 seconds)...</strong>
+                  <div className="waking-subtext">Free-tier hosting spins down when idle. Connecting to BrandPilot backend...</div>
+                </div>
+              </div>
             ) : (
               <select
                 id="demo-user"

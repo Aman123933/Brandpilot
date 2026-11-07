@@ -3,7 +3,17 @@
 > **The standard, held.**  
 > Every claim has a source. Every approval has a history.
 
-BrandPilot is an enterprise brand-governance and provenance platform. It prevents brand drift, misinformation, and unverified claims before marketing copy goes live, enforces human review during publication, issues cryptographic verification passports, and continuously monitors published assets against living brand facts.
+BrandPilot is an enterprise brand-governance and provenance platform. It prevents brand drift, misinformation, and unverified claims before marketing copy goes live, enforces human review during publication, issues verification passports and provenance audit trails, and continuously monitors published assets against living brand facts.
+
+---
+
+## Live Deployment
+
+- **Web Application**: `https://<YOUR_RENDER_SERVICE_URL>`
+- **API Documentation**: `https://<YOUR_RENDER_SERVICE_URL>/docs`
+- **Public Verification**: `https://<YOUR_RENDER_SERVICE_URL>/verify/<PASSPORT_CODE>`
+
+*(Replace `<YOUR_RENDER_SERVICE_URL>` with your live Render or Hugging Face Space URL after deployment).*
 
 ---
 
@@ -12,11 +22,13 @@ BrandPilot is an enterprise brand-governance and provenance platform. It prevent
 1. [Workflow & Key Concepts](#workflow--key-concepts)
 2. [Architecture Overview](#architecture-overview)
 3. [Full-Stack Quickstart](#full-stack-quickstart)
-4. [Backend Guide](#backend-guide)
-5. [Frontend Guide](#frontend-guide)
-6. [Role-Based Walkthrough](#role-based-walkthrough)
-7. [Testing & Verification](#testing--verification)
-8. [Remaining Production Integrations](#remaining-production-integrations)
+4. [Deployment (Render & Hugging Face Spaces)](#deployment-render--hugging-face-spaces)
+5. [Backend Guide](#backend-guide)
+6. [Frontend Guide](#frontend-guide)
+7. [Role-Based Walkthrough](#role-based-walkthrough)
+8. [Testing & Verification](#testing--verification)
+9. [AI & Tools Disclosure](#ai--tools-disclosure)
+10. [Remaining Production Integrations](#remaining-production-integrations)
 
 ---
 
@@ -47,15 +59,13 @@ BrandPilot is an enterprise brand-governance and provenance platform. It prevent
 
 3. **Pre-flight Brand Audit Engine**
    - **Deterministic Engine**: Regex pattern matching, banned vocabulary lookup, expired/mismatched fact checks, and accessibility validations.
-   - **Gemini AI Engine**: Intelligent claim substantiation, tone consistency analysis, with automatic fallback and prompt caching.
+   - **Gemini AI Engine**: Intelligent claim substantiation and tone consistency analysis.
+   - **No API Key Behavior**: If no `GEMINI_API_KEY` is provided, BrandPilot operates using deterministic rule checks only. AI checks are safely skipped and an informative banner is displayed in the UI. No fake or mocked findings are fabricated.
    - **Inline One-Click Fixes**: Suggested replacements can be accepted via `PATCH /findings/{id}`, automatically applying changes and generating a new revision.
 
 4. **Brand Red-Team Adversarial Simulation**
-   - Evaluates content from 4 adversarial perspectives before launch:
-     - **Cynical Customer**: Catches fine print traps, hidden fees, and overpromising claims.
-     - **Regulatory / Legal Auditor**: Flags FTC, FDA, or claim substantiation liabilities.
-     - **Competitor Marketer**: Finds exploitable weaknesses, unproven "#1" claims, and ambiguities.
-     - **Skeptical Tech Reviewer**: Tests technical spec claims against real-world engineering constraints.
+   - Evaluates content from adversarial perspectives before launch (Critical Journalist, Competitor, Skeptical Customer).
+   - Unverifiable claims are labeled "Unverified", never "false".
 
 5. **Human-in-the-Loop Review & Approval**
    - Reviewer queue organizes pending content by severity of findings.
@@ -63,13 +73,13 @@ BrandPilot is an enterprise brand-governance and provenance platform. It prevent
    - Reviewers can approve, request changes, or reject (mandatory justification required on rejections).
 
 6. **Verification Passports & Provenance**
-   - Approved assets are stamped with an immutable Passport code (e.g., `BP-A97J-N4`).
-   - Public endpoint (`GET /passports/{code}/public`) returns verification metadata without exposing confidential copy or internal notes.
-   - Generates scannable QR codes (`GET /passports/{code}/qr.png`) for physical packaging and digital banners.
+   - Approved assets are stamped with a unique Passport verification code (e.g., `BP-A97J-N4`).
+   - Public endpoint (`GET /passports/{code}/public`) and dedicated public route (`/verify/:code`) return verification metadata (title, approval date, reviewer first name, guideline version, linked fact count, AI disclosure) without exposing confidential raw copy or internal fact values.
+   - Generates scannable QR codes (`GET /passports/{code}/qr.png`) for packaging and digital banners.
 
 7. **Continuous Post-Publication Monitoring & Recall**
-   - When a brand fact evolves (e.g., warranty reduced from 2 years to 1 year, or return window updated), BrandPilot immediately identifies every published asset linked to the outdated fact.
-   - Asset status automatically transitions to `needs_revalidation`, passport is marked `review_required`, and urgent notifications are dispatched to content owners.
+   - When a brand fact evolves (e.g., warranty reduced from 2 years to 1 year), BrandPilot immediately identifies every published asset linked to the outdated fact.
+   - Asset status transitions to `needs_revalidation`, passport is marked `review_required`, and urgent notifications are dispatched to content owners.
 
 ---
 
@@ -90,15 +100,22 @@ brandpilot/
 │   └── requirements.txt    # Python backend dependencies
 ├── frontend/
 │   ├── src/
-│   │   ├── api.js          # Unified API client & authentication interceptors
+│   │   ├── api.js          # Unified API client (defaults to same-origin)
 │   │   ├── App.jsx         # Full interactive dashboard & demo login workflow
+│   │   ├── PublicVerify.jsx# Public verification page (/verify/:code)
 │   │   ├── App.css         # Typography, design tokens & responsive layout
-│   │   └── main.jsx        # React root
+│   │   └── main.jsx        # React root & React Router DOM configuration
 │   ├── package.json        # Frontend dependencies (React 18, Vite, Tailwind CSS 4)
 │   └── vite.config.js      # Vite build configuration
+├── scripts/
+│   └── smoke_test.py       # End-to-end user story verification runner
+├── Dockerfile              # Multi-stage production container (Vite build + Uvicorn)
+├── render.yaml             # Render Blueprint for free web service
 ├── docs/
-│   └── API.md              # Detailed OpenAPI / REST endpoint specifications
-├── verify_endpoints.py     # End-to-end multi-module verification suite
+│   ├── API.md              # Detailed OpenAPI / REST endpoint specifications
+│   └── BRIEF.md            # Hackathon project specification
+├── AI_AND_TOOLS_DISCLOSURE.md # Full disclosure of libraries, APIs & tools
+├── .env.example            # Example configuration template
 └── pytest.ini              # Pytest configuration
 ```
 
@@ -122,11 +139,12 @@ cp .env.example .env
 Copy-Item .env.example .env
 ```
 
-*(Optional)* Add your Google Gemini API key to `.env` to enable live generative AI auditing and red-team personas:
+*(Optional)* Add your Google Gemini API key to `.env` to enable generative AI auditing and red-team personas:
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-2.5-flash
 ```
-*(If no key is provided, BrandPilot operates in deterministic rule mode with mocked fallback responses).*
+*(If no key is provided, BrandPilot operates in deterministic rule mode with clear UI status banners).*
 
 ---
 
@@ -155,14 +173,14 @@ uvicorn backend.app.main:app --reload --port 8000
 ```
 
 The backend is now accessible at:
-- **API Base**: `http://localhost:8000`
+- **Web App & API Root**: `http://localhost:8000`
 - **Interactive Swagger Docs**: `http://localhost:8000/docs`
 - **ReDoc Documentation**: `http://localhost:8000/redoc`
 - **Health Check**: `http://localhost:8000/health`
 
 ---
 
-### 3. Frontend Setup & Run
+### 3. Frontend Setup & Run (Development)
 
 In a second terminal:
 
@@ -173,7 +191,48 @@ npm run dev
 ```
 
 The frontend application will start at:
-- **Web App**: `http://localhost:5173`
+- **Dev Web App**: `http://localhost:5173`
+
+---
+
+## Deployment (Render & Hugging Face Spaces)
+
+BrandPilot supports single-link deployment where FastAPI directly serves the pre-built React SPA (`frontend/dist`) along with all API endpoints and public verification routes (`/verify/:code`).
+
+### Option A: Render Free Web Service (Recommended)
+
+1. Connect your repository to **[Render](https://render.com/)**.
+2. Click **New +** -> **Blueprint**, and select your repository containing `render.yaml`.
+3. Configure the environment variables:
+   - `GEMINI_API_KEY`: Your key from Google AI Studio (optional).
+   - `GEMINI_MODEL`: `gemini-2.5-flash` (or your chosen model).
+   - `DATABASE_URL`: Optional (defaults to zero-setup SQLite; provide Supabase PostgreSQL URL for persistent multi-instance production).
+   - `PUBLIC_BASE_URL`: The public URL assigned by Render (e.g., `https://brandpilot.onrender.com`).
+4. Click **Apply Blueprint**. Render will build the multi-stage Docker container and launch the web service on port 8000.
+5. *Cold Start Note*: Free Render instances spin down after inactivity. The frontend automatically shows a "Waking the server (about 30 seconds)" indicator while the instance boots.
+
+### Option B: Hugging Face Docker Space (Fallback)
+
+1. Create a new **Space** on **[Hugging Face](https://huggingface.co/new-space)**.
+2. Select **Docker** as the Space SDK (Blank).
+3. Push this repository to the Hugging Face Space git remote.
+4. Add the following header to the Space's `README.md` frontmatter:
+   ```yaml
+   ---
+   title: BrandPilot
+   emoji: 🛡️
+   colorFrom: amber
+   colorTo: red
+   sdk: docker
+   app_port: 8000
+   pinned: false
+   ---
+   ```
+5. In **Settings -> Variables and Secrets**, configure:
+   - Secret `GEMINI_API_KEY`: Your Google AI Studio key.
+   - Secret `SECRET_KEY`: A secure random secret.
+   - Variable `GEMINI_MODEL`: `gemini-2.5-flash`.
+   - Variable `PUBLIC_BASE_URL`: `https://<your-username>-brandpilot.hf.space`.
 
 ---
 
@@ -189,7 +248,7 @@ The frontend application will start at:
 | `/assets` | Text drafts, document parsing (`.txt`, `.docx`, `.pdf`), pre-flight audits, red-team simulation | `creator`, `brand_manager`, `reviewer` |
 | `/findings` | Inline finding resolution (`accepted` suggestion, `dismissed`) | `creator`, `brand_manager`, `reviewer` |
 | `/reviews` | Reviewer-only queue and approval decisions | `reviewer` |
-| `/passports` | Public verification lookup, QR code generation (`.png`), full audit chain | Public (`/public`, `/qr.png`), Authenticated |
+| `/passports` | Public verification lookup (`/public`), QR code generation (`/qr.png`), full audit chain | Public (`/public`, `/qr.png`), Authenticated |
 | `/notifications` | Activity alerts, recall warnings, mark-as-read | Authenticated user |
 | `/admin` | Manual fact expiry check and automated asset recall | `brand_manager` |
 
@@ -199,8 +258,9 @@ The frontend application will start at:
 
 ### Technology Stack
 - **Framework**: React 18
+- **Routing**: React Router DOM v7 (`/` for workspace, `/verify/:code` for public verification)
 - **Build Tool**: Vite 8
-- **Styling**: Vanilla CSS custom properties with `@tailwindcss/vite` 4
+- **Styling**: Vanilla CSS custom properties with Tailwind CSS 4
 - **Typography**: `@fontsource/fraunces`, `@fontsource/ibm-plex-sans`, `@fontsource/ibm-plex-mono`
 
 ### Key UI Capabilities
@@ -215,15 +275,8 @@ The frontend application will start at:
   - "Red-Team Simulation" rendering adversarial customer, auditor, and competitor risks.
   - "Submit for Approval" trigger.
   - Verification Passport inspector and QR code link.
-- **Notifications Drawer**: Real-time alerts for approvals, review submissions, and fact recall events with "Mark read" capabilities.
-
-### Production Build & Linting
-
-```bash
-cd frontend
-npm run lint    # Verifies ESLint rules
-npm run build   # Produces production bundle in frontend/dist/
-```
+- **Public Verification Page (`/verify/:code`)**: Logged-out public view displaying verification stamps (VALID / REVIEW REQUIRED / WITHDRAWN), approval date, reviewer first name, guideline version, linked-fact count, and AI disclosure, without exposing raw copy or internal fact values.
+- **Waking Server Indicator**: Displays a clear "Waking the server (about 30 seconds)" loading state during initial cold-start requests.
 
 ---
 
@@ -233,15 +286,15 @@ BrandPilot comes pre-seeded with the **Kestrel Audio** brand workspace:
 
 ### 1. Brand Manager (`Maya Lin`)
 - Add ground-truth product facts (e.g., `water_resistance: IPX8`, `battery_life_hours: 24`).
-- Define brand guidelines (banned words like `"cheap"` or `"unrivaled"`).
-- Test policy changes: update `return_window_days` from 30 to 14 days and run **⚡ Run Recall Audit** to flag outdated content.
+- Define brand guidelines (banned words like `"cheap"` or `"best in the world"`).
+- Test policy changes: update `return_window_days` from 30 to 14 days and run **Run Recall Audit** to flag outdated content.
 
 ### 2. Content Creator (`Dev Patel`)
 - Draft new promotional copy or upload a marketing deck.
-- Run **🔍 Pre-flight Audit**: instantly highlights discrepancies (e.g. wrong warranty duration, banned words).
+- Run **Pre-flight Audit**: instantly highlights discrepancies (e.g. wrong warranty duration, banned words).
 - Click **Accept fix** on findings to auto-apply suggested wording.
-- Run **🛡️ Red-Team Simulation** to spot regulatory or competitor risks.
-- Click **🚀 Submit for Approval** to transfer the asset to the review queue.
+- Run **Red-Team Simulation** to spot regulatory or competitor risks.
+- Click **Submit for Approval** to transfer the asset to the review queue.
 
 ### 3. Reviewer (`Sana Miller`)
 - Open the **Reviewer queue** tab.
@@ -253,32 +306,35 @@ BrandPilot comes pre-seeded with the **Kestrel Audio** brand workspace:
 
 ## Testing & Verification
 
-BrandPilot includes extensive testing across all layers:
-
 ### 1. Pytest Backend Suite (47 Tests)
 
-Runs all unit, regression, RBAC, Gemini mock, deterministic rule, and recall tests:
-
-```powershell
-# Windows
-.\.venv\Scripts\pytest.exe -v
-```
+Runs all unit, regression, RBAC, deterministic rule, and recall tests:
 
 ```bash
-# Linux / macOS
 pytest backend -v
 ```
 
-### 2. End-to-End Verification Suite (`verify_endpoints.py`)
+### 2. End-to-End Story Smoke Test (`scripts/smoke_test.py`)
 
-Tests the complete end-to-end lifecycle on a running server across 12 distinct modules:
+Walks the complete core story against a target base URL:
 
-```powershell
-# In terminal 1:
-.\.venv\Scripts\uvicorn.exe backend.app.main:app --port 8000
+```bash
+python scripts/smoke_test.py --base-url http://localhost:8000
+```
 
-# In terminal 2:
-.\.venv\Scripts\python.exe verify_endpoints.py
+Steps executed and verified:
+1. Pre-flight audit on planted sample asset (identifies banned words & fact mismatches).
+2. Accept suggested fixes (creates new revision with corrections).
+3. Submit asset for reviewer approval.
+4. Reviewer approves asset and issues Passport.
+5. Verify passport status is VALID with linked ground-truth facts.
+6. Fact evolution: brand manager bumps a fact version, triggering automatic recall to REVIEW REQUIRED.
+7. Public verification: fetch logged-out public passport verifying status and clean metadata.
+
+### 3. Comprehensive Verification Suite (`verify_endpoints.py`)
+
+```bash
+python verify_endpoints.py
 ```
 
 *Output summary:*
@@ -299,17 +355,15 @@ Tests the complete end-to-end lifecycle on a running server across 12 distinct m
 --- 11. Testing Fact Evolution & Recall Simulation --- [OK]
 --- 12. Testing Audit History & Notifications --- [OK]
 =======================================================
-ALL 12 MODULE CHECKS PASSED FLAWLESSLY UNDER EVERY SITUATION!
+ALL 12 MODULE CHECKS PASSED: 12 of 12 verification modules completed successfully.
 =======================================================
 ```
 
-### 3. Frontend Quality & Build Verification
+---
 
-```bash
-cd frontend
-npm run lint
-npm run build
-```
+## AI & Tools Disclosure
+
+For complete details on all libraries, APIs, Gemini models, cloud infrastructure, and AI tools used in BrandPilot, see [AI_AND_TOOLS_DISCLOSURE.md](AI_AND_TOOLS_DISCLOSURE.md).
 
 ---
 

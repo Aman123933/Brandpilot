@@ -1,5 +1,5 @@
 export const API_BASE_URL =
-  import.meta.env.VITE_API_URL || 'http://localhost:8000'
+  import.meta.env.VITE_API_URL || ''
 
 export async function apiRequest(endpoint, options = {}) {
   const token = localStorage.getItem('brandpilot_token')
@@ -40,4 +40,8 @@ export function demoLogin(userId) {
     method: 'POST',
     body: JSON.stringify({ user_id: userId }),
   })
+}
+
+export function getPublicPassport(code) {
+  return apiRequest(`/passports/${code}/public`)
 }
