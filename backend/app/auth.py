@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
-from typing import List, Callable
+from typing import List, Callable, Tuple, Optional
+import hashlib
+import secrets
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -13,6 +15,31 @@ security = HTTPBearer(auto_error=False)
 
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24 * 7
+PBKDF2_ITERATIONS = 210_000
+
+
+def hash_password(password: str, salt: Optional[str] = None) -> Tuple[str, str]:
+    if salt is None:
+        salt = secrets.token_hex(16)
+    key = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        PBKDF2_ITERATIONS,
+    )
+    return key.hex(), salt
+
+
+def verify_password(password: str, stored_hash: str, salt: str) -> bool:
+    if not stored_hash or not salt:
+        return False
+    key = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        PBKDF2_ITERATIONS,
+    )
+    return secrets.compare_digest(key.hex(), stored_hash)
 
 
 def create_access_token(user: User) -> str:

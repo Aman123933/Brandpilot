@@ -78,13 +78,14 @@ def check_banned_terms(text: str, guideline_version: Any) -> List[Dict[str, Any]
             findings.append({
                 "kind": "rule_violation",
                 "severity": "high",
+                "rule_id": item.get("id"),
                 "quote": quote,
                 "start_offset": start,
                 "end_offset": end,
                 "explanation": f"Banned term '{term}' violates brand guidelines: {why}",
                 "suggestion": preferred,
                 "source_type": "guideline",
-                "source_ref": guideline_version.id,
+                "source_ref": getattr(guideline_version, "id", None),
                 "origin": "rules",
                 "status": "open",
             })
@@ -469,6 +470,9 @@ def check_accessibility(text: str) -> List[Dict[str, Any]]:
 
 def verify_finding_offsets(text: str, finding: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Verify and enforce that finding quote matches text[start_offset:end_offset] exactly."""
+    if "rule_id" not in finding:
+        finding["rule_id"] = None
+
     start = finding.get("start_offset", -1)
     end = finding.get("end_offset", -1)
     quote = finding.get("quote", "")

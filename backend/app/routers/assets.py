@@ -39,6 +39,7 @@ from backend.app.schemas import (
 from backend.app.auth import get_current_user, require_roles
 from backend.app.audit.rules import normalize_intake_text, run_deterministic_rules
 from backend.app.audit.gemini import run_gemini_brand_audit, run_gemini_red_team, filter_relevant_facts
+from backend.app.services.recall import lazy_throttled_check_expired_facts
 
 router = APIRouter(prefix="/assets", tags=["Assets"])
 
@@ -51,6 +52,7 @@ def list_assets(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    lazy_throttled_check_expired_facts(db)
     assets = (
         db.query(ContentAsset)
         .filter(ContentAsset.org_id == current_user.org_id)
@@ -66,6 +68,17 @@ def create_asset(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles("creator", "brand_manager")),
 ):
+    if not payload.body or not payload.body.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Content body cannot be empty",
+        )
+    if not payload.title or not payload.title.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Asset title cannot be empty",
+        )
+
     now = datetime.now(timezone.utc)
     normalized_body = normalize_intake_text(payload.body)
 
@@ -131,6 +144,11 @@ async def upload_asset(
         )
 
     content_bytes = await file.read()
+    if len(content_bytes) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty",
+        )
     if len(content_bytes) > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -182,8 +200,11 @@ async def upload_asset(
 
     # Normalize whitespace once, keeping offsets stable
     normalized_body = normalize_intake_text(extracted_text)
-    if not normalized_body:
-        normalized_body = "(Empty document)"
+    if not normalized_body or not normalized_body.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Uploaded file contains no readable text content",
+        )
 
     # Derive title if not explicitly provided
     if not title or not title.strip():
@@ -298,7 +319,9 @@ def audit_asset(
     deterministic_findings = run_deterministic_rules(asset.body, guideline_version, facts)
 
     # 2. Gemini AI Brand Audit
-    ai_findings, ai_available = run_gemini_brand_audit(asset.body, guideline_version, facts)
+    ai_findings, ai_available, ai_message = run_gemini_brand_audit(
+        asset.body, guideline_version, facts, db=db, user_id=current_user.id
+    )
 
     # Combine findings (avoid duplicate identical spans)
     seen_spans = {(f["start_offset"], f["end_offset"]) for f in deterministic_findings}
@@ -322,6 +345,7 @@ def audit_asset(
         finding_obj = Finding(
             asset_id=asset.id,
             revision=asset.current_revision,
+            rule_id=f.get("rule_id"),
             kind=f["kind"],
             severity=f["severity"],
             quote=f["quote"],
@@ -371,6 +395,7 @@ def audit_asset(
         asset_id=asset.id,
         revision=asset.current_revision,
         ai_available=ai_available,
+        ai_message=ai_message,
         total_findings=len(stored_models),
         findings=AuditGroupedFindings(
             high=high_group,
@@ -401,7 +426,9 @@ def redteam_asset(
             detail=f"Content asset with ID {asset_id} not found",
         )
 
-    risks, ai_available = run_gemini_red_team(asset.body)
+    risks, ai_available, ai_message = run_gemini_red_team(
+        asset.body, db=db, user_id=current_user.id
+    )
 
     # Store red team risks in findings table for audit log
     now = datetime.now(timezone.utc)
@@ -430,6 +457,7 @@ def redteam_asset(
         asset_id=asset.id,
         revision=asset.current_revision,
         ai_available=ai_available,
+        ai_message=ai_message,
         risks=[RedTeamFinding.model_validate(r) for r in risks],
     )
 
@@ -485,6 +513,12 @@ def submit_for_review(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Content asset with ID {asset_id} not found",
+        )
+
+    if asset.status == "in_review":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Asset is already in review",
         )
 
     # 1. Block if latest revision has never been audited

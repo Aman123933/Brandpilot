@@ -41,6 +41,8 @@ class User(Base):
     name = Column(String(255), nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=False)
     role = Column(String(50), nullable=False)
+    password_hash = Column(String(255), nullable=True)
+    salt = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     organization = relationship("Organization", back_populates="users")
@@ -73,10 +75,14 @@ class GuidelineVersion(Base):
     version = Column(Integer, nullable=False)
     body = Column(Text, nullable=False)
     rules = Column(JSON, nullable=False, default=dict)
+    change_note = Column(Text, nullable=True)
+    status = Column(String(20), default="active", nullable=False)
+    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
 
     guideline = relationship("Guideline", back_populates="versions")
+    created_by = relationship("User", foreign_keys=[created_by_id])
 
     __table_args__ = (
         UniqueConstraint("guideline_id", "version", name="uq_guideline_version"),
@@ -180,6 +186,7 @@ class Finding(Base):
     id = Column(Integer, primary_key=True, index=True)
     asset_id = Column(Integer, ForeignKey("content_assets.id", ondelete="CASCADE"), nullable=False, index=True)
     revision = Column(Integer, nullable=False)
+    rule_id = Column(String(50), nullable=True)
     kind = Column(String(50), nullable=False)
     severity = Column(String(20), nullable=False)
     quote = Column(Text, nullable=False)
@@ -252,10 +259,14 @@ class Passport(Base):
     approved_by = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     approved_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
     ai_disclosure = Column(Text, nullable=True)
+    withdrawn_reason = Column(Text, nullable=True)
+    withdrawn_at = Column(DateTime(timezone=True), nullable=True)
+    withdrawn_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
     asset = relationship("ContentAsset", back_populates="passport")
-    approver = relationship("User")
+    approver = relationship("User", foreign_keys=[approved_by])
+    withdrawn_by_user = relationship("User", foreign_keys=[withdrawn_by])
 
 
 class Notification(Base):
@@ -265,6 +276,7 @@ class Notification(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     message = Column(Text, nullable=False)
     asset_id = Column(Integer, ForeignKey("content_assets.id", ondelete="CASCADE"), nullable=True)
+    fact_version_id = Column(Integer, ForeignKey("fact_versions.id", ondelete="CASCADE"), nullable=True, index=True)
     read = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
 
@@ -285,3 +297,59 @@ class ActivityLog(Base):
 
     organization = relationship("Organization")
     actor = relationship("User")
+
+
+class LoginAttempt(Base):
+    __tablename__ = "login_attempts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), nullable=False, index=True)
+    attempted_at = Column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    success = Column(Boolean, default=False, nullable=False)
+
+
+class ReplayRun(Base):
+    __tablename__ = "replay_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    guideline_id = Column(Integer, ForeignKey("guidelines.id", ondelete="CASCADE"), nullable=False, index=True)
+    version = Column(Integer, nullable=False, index=True)
+    active_version = Column(Integer, nullable=False)
+    proposed_version = Column(Integer, nullable=False)
+    scope = Column(String(20), default="approved", nullable=False)
+    ran_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+    assets_checked = Column(Integer, default=0, nullable=False)
+    summary = Column(JSON, nullable=False, default=dict)
+    newly_flagged = Column(JSON, nullable=False, default=list)
+    newly_cleared = Column(JSON, nullable=False, default=list)
+
+    guideline = relationship("Guideline")
+
+
+class ExpiryRun(Base):
+    __tablename__ = "expiry_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ran_at = Column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    source = Column(String(50), default="manual", nullable=False)
+    affected_assets_count = Column(Integer, default=0, nullable=False)
+    details = Column(JSON, nullable=True)
+
+
+class AiCache(Base):
+    __tablename__ = "ai_cache"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cache_key = Column(String(64), unique=True, index=True, nullable=False)
+    task_type = Column(String(50), nullable=False)
+    response_json = Column(JSON, nullable=False)
+    model_used = Column(String(100), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class AiCallLog(Base):
+    __tablename__ = "ai_call_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    called_at = Column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)

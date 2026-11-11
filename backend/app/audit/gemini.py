@@ -2,12 +2,15 @@ import hashlib
 import json
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any, Optional, Set, Tuple
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from sqlalchemy.orm import Session
 
 from pydantic import BaseModel, Field
 
 from backend.app.config import settings
+from backend.app.models import AiCache, AiCallLog
 from backend.app.audit.prompts import (
     BRAND_AUDIT_SYSTEM_PROMPT,
     BRAND_AUDIT_USER_TEMPLATE,
@@ -17,7 +20,7 @@ from backend.app.audit.prompts import (
 
 logger = logging.getLogger("brandpilot.audit.gemini")
 
-# In-memory caches to make repeated runs instant: (hash -> (data, timestamp))
+# Memory caches as fast layer:
 _AUDIT_CACHE: Dict[str, List[Dict[str, Any]]] = {}
 _REDTEAM_CACHE: Dict[str, List[Dict[str, Any]]] = {}
 
@@ -65,7 +68,6 @@ def filter_relevant_facts(text: str, facts: List[Any]) -> List[Tuple[Any, Any]]:
     }
 
     for fact in facts:
-        # Get active/current version
         current_version = None
         for v in (fact.versions or []):
             if v.is_current:
@@ -87,12 +89,13 @@ def filter_relevant_facts(text: str, facts: List[Any]) -> List[Tuple[Any, Any]]:
 
 def _build_audit_cache_key(text: str, guideline_version_id: Optional[int], fact_version_ids: List[int]) -> str:
     sorted_facts = ",".join(str(f_id) for f_id in sorted(fact_version_ids))
-    raw = f"{text}|{guideline_version_id}|{sorted_facts}"
+    raw = f"audit:{text}|{guideline_version_id}|{sorted_facts}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _build_redteam_cache_key(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    raw = f"redteam:{text}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _is_retryable_error(exc: Exception) -> bool:
@@ -115,7 +118,7 @@ def _is_retryable_error(exc: Exception) -> bool:
     ])
 
 
-def _execute_model_call(fn, model_name: str, timeout_seconds: float = 15.0):
+def _execute_model_call(fn, model_name: str, timeout_seconds: float = 30.0):
     import inspect
     executor = ThreadPoolExecutor(max_workers=1)
     sig = inspect.signature(fn)
@@ -133,45 +136,53 @@ def _execute_model_call(fn, model_name: str, timeout_seconds: float = 15.0):
         executor.shutdown(wait=False)
 
 
-def _call_gemini_with_fallback(fn, timeout_seconds: float = 15.0) -> Tuple[Any, str]:
+def _call_gemini_with_fallback(fn, timeout_seconds: float = 30.0) -> Tuple[Any, str]:
     """
-    Execute fn(model_name) with a per-call timeout (default 15s).
-    On a 503/429/timeout from the main model, retry once on the next model in the fallback list before giving up.
-    Log which model answered.
+    Tries GEMINI_MODEL first. On 429, 503 or timeout, tries each fallback model in order.
     Returns (result, answered_model).
     """
     main_model = settings.GEMINI_MODEL
-    fallback_models = [m for m in settings.fallback_models_list if m and m != main_model]
+    models_to_try = [main_model] + [
+        m for m in settings.fallback_models_list if m and m != main_model
+    ]
 
-    # Attempt 1: Main model
-    try:
-        result = _execute_model_call(fn, main_model, timeout_seconds=timeout_seconds)
-        logger.info(f"Gemini model '{main_model}' answered.")
-        return result, main_model
-    except Exception as exc:
-        if not _is_retryable_error(exc) or not fallback_models:
-            raise exc
+    last_exc = None
+    for idx, model_name in enumerate(models_to_try):
+        try:
+            result = _execute_model_call(fn, model_name, timeout_seconds=timeout_seconds)
+            logger.info(f"Gemini model '{model_name}' succeeded.")
+            return result, model_name
+        except Exception as exc:
+            last_exc = exc
+            if not _is_retryable_error(exc) and not isinstance(exc, (FutureTimeoutError, TimeoutError)):
+                logger.warning(f"Gemini model '{model_name}' encountered non-retryable error: {exc}")
+                raise exc
+            logger.warning(
+                f"Gemini model '{model_name}' failed: {exc}. "
+                + (f"Attempting next fallback..." if idx + 1 < len(models_to_try) else "No more fallbacks.")
+            )
 
-        fallback_model = fallback_models[0]
-        logger.warning(
-            f"Main Gemini model '{main_model}' failed with retryable error: {exc}. "
-            f"Retrying once on fallback model '{fallback_model}'..."
-        )
-
-    # Attempt 2: Next model in fallback list
-    try:
-        result = _execute_model_call(fn, fallback_model, timeout_seconds=timeout_seconds)
-        logger.info(f"Gemini model '{fallback_model}' answered.")
-        return result, fallback_model
-    except Exception as exc:
-        logger.warning(f"Fallback Gemini model '{fallback_model}' failed: {exc}")
-        raise exc
+    raise last_exc or RuntimeError("All Gemini models failed")
 
 
-def _call_gemini_with_retry(fn, timeout_seconds: float = 15.0):
-    """Backwards compatible alias for _call_gemini_with_fallback."""
-    res, _ = _call_gemini_with_fallback(fn, timeout_seconds=timeout_seconds)
-    return res
+def _check_user_ai_rate_limit(db: Optional[Session], user_id: Optional[int]) -> bool:
+    """Check if user has exceeded 5 AI calls per hour. Returns True if allowed, False if exceeded."""
+    if not db or not user_id:
+        return True
+    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    call_count = (
+        db.query(AiCallLog)
+        .filter(AiCallLog.user_id == user_id, AiCallLog.called_at >= one_hour_ago)
+        .count()
+    )
+    return call_count < 5
+
+
+def _record_user_ai_call(db: Optional[Session], user_id: Optional[int]):
+    if not db or not user_id:
+        return
+    db.add(AiCallLog(user_id=user_id, called_at=datetime.now(timezone.utc)))
+    db.commit()
 
 
 def validate_gemini_findings(
@@ -180,21 +191,18 @@ def validate_gemini_findings(
     valid_guideline_id: Optional[int],
     valid_fact_ids: Set[int],
 ) -> List[Dict[str, Any]]:
-    """Validate that cited IDs exist in prompt context and quotes appear at stated offsets. Drop invalid."""
+    """Validate cited IDs exist in prompt context and quotes appear at offsets."""
     validated: List[Dict[str, Any]] = []
 
     for item in raw_findings:
-        # Check source citation validity
         source_type = (item.get("source_type") or "none").lower()
         source_ref = item.get("source_ref")
 
         if source_type == "guideline":
             if not valid_guideline_id or source_ref != valid_guideline_id:
-                # Hallucinated or unknown guideline id -> drop
                 continue
         elif source_type == "fact":
             if not source_ref or source_ref not in valid_fact_ids:
-                # Hallucinated or unknown fact id -> drop
                 continue
         else:
             source_type = "none"
@@ -207,15 +215,12 @@ def validate_gemini_findings(
         start = item.get("start_offset", -1)
         end = item.get("end_offset", -1)
 
-        # Verify quote matches text at offsets
         if not (0 <= start < end <= len(text) and text[start:end] == quote):
-            # Try finding the exact quote in text
             idx = text.find(quote)
             if idx != -1:
                 start = idx
                 end = idx + len(quote)
             else:
-                # Quote does not appear in text -> drop
                 continue
 
         kind = item.get("kind", "tone")
@@ -227,7 +232,6 @@ def validate_gemini_findings(
             severity = "medium"
 
         explanation = item.get("explanation", "Tone or messaging issue identified by AI review.")
-        # Ensure unverifiable claims are labeled 'Unverified', never 'false'
         if "false" in explanation.lower() and "unverified" not in explanation.lower():
             explanation = explanation.replace("false", "Unverified").replace("False", "Unverified")
 
@@ -243,6 +247,7 @@ def validate_gemini_findings(
             "source_ref": source_ref,
             "origin": "ai",
             "status": "open",
+            "rule_id": None,
         })
 
     return validated
@@ -252,25 +257,36 @@ def run_gemini_brand_audit(
     text: str,
     guideline_version: Optional[Any],
     facts: List[Any],
-) -> Tuple[List[Dict[str, Any]], bool]:
+    db: Optional[Session] = None,
+    user_id: Optional[int] = None,
+) -> Tuple[List[Dict[str, Any]], bool, Optional[str]]:
     """
     Run Gemini Brand Audit assist.
-    Returns (findings, ai_available). If Gemini fails or is unconfigured, returns ([], False).
+    Returns (findings, ai_available, ai_message).
     """
     if not settings.GEMINI_API_KEY or not settings.GEMINI_API_KEY.strip():
-        logger.info("GEMINI_API_KEY is not configured; skipping AI brand audit.")
-        return [], False
+        return [], False, "AI is not configured. Rule-based checks completed."
 
     # Retrieve only relevant facts
     relevant_pairs = filter_relevant_facts(text, facts)
     valid_fact_ids = {fv.id for _, fv in relevant_pairs}
     valid_guideline_id = guideline_version.id if guideline_version else None
 
-    # Check cache
+    # Check cache (DB and memory)
     cache_key = _build_audit_cache_key(text, valid_guideline_id, list(valid_fact_ids))
     if cache_key in _AUDIT_CACHE:
-        logger.info("Brand audit cache hit.")
-        return _AUDIT_CACHE[cache_key], True
+        return _AUDIT_CACHE[cache_key], True, None
+
+    if db:
+        cached_entry = db.query(AiCache).filter(AiCache.cache_key == cache_key).first()
+        if cached_entry:
+            data = cached_entry.response_json or []
+            _AUDIT_CACHE[cache_key] = data
+            return data, True, None
+
+    # Check user quota rate limit (5 AI calls per hour)
+    if not _check_user_ai_rate_limit(db, user_id):
+        return [], False, "AI hourly limit reached (5 calls per hour). Rule-based checks completed."
 
     # Build facts context string
     facts_lines = []
@@ -291,7 +307,10 @@ def run_gemini_brand_audit(
         guideline_version_id=valid_guideline_id or "N/A",
         guideline_title=getattr(getattr(guideline_version, "guideline", None), "title", "Brand Guidelines"),
         tone_notes=", ".join(rules.get("tone_notes", [])) or "None",
-        required_phrases=", ".join(rules.get("required_phrases", [])) or "None",
+        required_phrases=", ".join(
+            (rp.get("phrase", "") if isinstance(rp, dict) else str(rp))
+            for rp in rules.get("required_phrases", [])
+        ) or "None",
         banned_terms=json.dumps(rules.get("banned_terms", [])),
         claim_rules=json.dumps(rules.get("claim_rules", [])),
         facts_context=facts_context,
@@ -316,30 +335,58 @@ def run_gemini_brand_audit(
         return response.text
 
     try:
-        raw_text, answered_model = _call_gemini_with_fallback(_execute, timeout_seconds=15.0)
+        timeout = float(settings.GEMINI_TIMEOUT_SECONDS)
+        raw_text, answered_model = _call_gemini_with_fallback(_execute, timeout_seconds=timeout)
         parsed = json.loads(raw_text)
         raw_findings = parsed.get("findings", [])
         validated = validate_gemini_findings(raw_findings, text, valid_guideline_id, valid_fact_ids)
+
+        # Store in DB cache and memory cache
+        if db:
+            db_entry = AiCache(
+                cache_key=cache_key,
+                task_type="audit",
+                response_json=validated,
+                model_used=answered_model,
+                created_at=datetime.now(timezone.utc),
+            )
+            db.add(db_entry)
+            db.commit()
+
+        _record_user_ai_call(db, user_id)
         _AUDIT_CACHE[cache_key] = validated
-        return validated, True
+        return validated, True, None
     except Exception as exc:
         logger.warning(f"Gemini brand audit failed: {exc}")
-        return [], False
+        return [], False, "AI service temporarily unavailable. Rule-based checks completed."
 
 
-def run_gemini_red_team(text: str) -> Tuple[List[Dict[str, Any]], bool]:
+def run_gemini_red_team(
+    text: str,
+    db: Optional[Session] = None,
+    user_id: Optional[int] = None,
+) -> Tuple[List[Dict[str, Any]], bool, Optional[str]]:
     """
     Run Brand Red Team analysis with 3 personas: Critical Journalist, Competitor, Skeptical Customer.
-    Returns (risks, ai_available).
+    Returns (risks, ai_available, ai_message).
     """
     if not settings.GEMINI_API_KEY or not settings.GEMINI_API_KEY.strip():
-        logger.info("GEMINI_API_KEY is not configured; skipping Red Team review.")
-        return [], False
+        return [], False, "AI is not configured. Rule-based checks completed."
 
     cache_key = _build_redteam_cache_key(text)
     if cache_key in _REDTEAM_CACHE:
-        logger.info("Red Team cache hit.")
-        return _REDTEAM_CACHE[cache_key], True
+        return _REDTEAM_CACHE[cache_key], True, None
+
+    if db:
+        cached_entry = db.query(AiCache).filter(AiCache.cache_key == cache_key).first()
+        if cached_entry:
+            data = cached_entry.response_json or []
+            _REDTEAM_CACHE[cache_key] = data
+            return data, True, None
+
+    # Check user quota rate limit (5 AI calls per hour)
+    if not _check_user_ai_rate_limit(db, user_id):
+        return [], False, "AI hourly limit reached (5 calls per hour). Rule-based checks completed."
 
     user_prompt = RED_TEAM_USER_TEMPLATE.format(content=text)
 
@@ -362,7 +409,8 @@ def run_gemini_red_team(text: str) -> Tuple[List[Dict[str, Any]], bool]:
         return response.text
 
     try:
-        raw_text, answered_model = _call_gemini_with_fallback(_execute, timeout_seconds=15.0)
+        timeout = float(settings.GEMINI_TIMEOUT_SECONDS)
+        raw_text, answered_model = _call_gemini_with_fallback(_execute, timeout_seconds=timeout)
         parsed = json.loads(raw_text)
         raw_risks = parsed.get("risks", [])
 
@@ -376,11 +424,9 @@ def run_gemini_red_team(text: str) -> Tuple[List[Dict[str, Any]], bool]:
                 severity = "medium"
 
             why = r.get("why", "Potential risk detected.")
-            # Unverifiable claims get the label 'Unverified', never 'false'
             if "false" in why.lower() and "unverified" not in why.lower():
                 why = why.replace("false", "Unverified").replace("False", "Unverified")
 
-            # Offset resolution if quote is in text
             start = -1
             end = -1
             if quote and quote in text:
@@ -398,8 +444,20 @@ def run_gemini_red_team(text: str) -> Tuple[List[Dict[str, Any]], bool]:
                 "label": "potential risks",
             })
 
+        if db:
+            db_entry = AiCache(
+                cache_key=cache_key,
+                task_type="redteam",
+                response_json=validated_risks,
+                model_used=answered_model,
+                created_at=datetime.now(timezone.utc),
+            )
+            db.add(db_entry)
+            db.commit()
+
+        _record_user_ai_call(db, user_id)
         _REDTEAM_CACHE[cache_key] = validated_risks
-        return validated_risks, True
+        return validated_risks, True, None
     except Exception as exc:
         logger.warning(f"Gemini red team review failed: {exc}")
-        return [], False
+        return [], False, "AI service temporarily unavailable. Rule-based checks completed."

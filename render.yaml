@@ -11,8 +11,18 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
-        value: gemini-3.5-flash-lite
+        value: gemini-3.8-flash
+      - key: GEMINI_FALLBACK_MODELS
+        value: gemini-3.5-flash,gemini-3.1-flash-lite
+      - key: GEMINI_TIMEOUT_SECONDS
+        value: "30"
       - key: SECRET_KEY
         generateValue: true
       - key: PUBLIC_BASE_URL
         sync: false
+      - key: DEMO_MODE
+        value: "true"
+      - key: CRON_SECRET
+        generateValue: true
+      - key: EXPIRY_CHECK_INTERVAL_MINUTES
+        value: "60"

@@ -115,7 +115,7 @@ def test_mocked_gemini_brand_audit_success(db_session: Session):
             mock_client_cls.return_value = mock_client
             mock_client.models.generate_content.return_value = MagicMock(text=mock_response_json)
 
-            findings, ai_available = run_gemini_brand_audit(asset.body, guideline_v, facts)
+            findings, ai_available, *rest = run_gemini_brand_audit(asset.body, guideline_v, facts)
             assert ai_available is True
             assert len(findings) == 1
             assert findings[0]["quote"] == quote
@@ -134,7 +134,7 @@ def test_mocked_gemini_malformed_response_fallback(db_session: Session):
             mock_client_cls.return_value = mock_client
             mock_client.models.generate_content.return_value = MagicMock(text="INVALID NOT JSON {{{")
 
-            findings, ai_available = run_gemini_brand_audit(asset.body, guideline_v, facts)
+            findings, ai_available, *rest = run_gemini_brand_audit(asset.body, guideline_v, facts)
             # Malformed JSON should fail gracefully returning ai_available=False
             assert ai_available is False
             assert len(findings) == 0
@@ -178,7 +178,7 @@ def test_gemini_retry_on_429(db_session: Session):
             mock_client_cls.return_value = mock_client
             mock_client.models.generate_content.side_effect = mock_generate
 
-            findings, ai_available = run_gemini_brand_audit(asset.body, guideline_v, facts)
+            findings, ai_available, *rest = run_gemini_brand_audit(asset.body, guideline_v, facts)
             assert call_count == 2, "Expected 1 retry on 429"
             assert ai_available is True
             assert len(findings) == 1
@@ -204,11 +204,11 @@ def test_gemini_cache_hit(db_session: Session):
             mock_client.models.generate_content.side_effect = mock_generate
 
             # First run
-            f1, a1 = run_gemini_brand_audit(asset.body, guideline_v, facts)
+            f1, a1, *rest = run_gemini_brand_audit(asset.body, guideline_v, facts)
             assert generate_calls == 1
 
             # Second run -> should hit cache without calling generate_content again
-            f2, a2 = run_gemini_brand_audit(asset.body, guideline_v, facts)
+            f2, a2, *rest = run_gemini_brand_audit(asset.body, guideline_v, facts)
             assert generate_calls == 1
             assert a2 is True
 
@@ -247,7 +247,7 @@ def test_mocked_gemini_red_team_personas():
             mock_client_cls.return_value = mock_client
             mock_client.models.generate_content.return_value = MagicMock(text=redteam_json)
 
-            risks, ai_available = run_gemini_red_team(text)
+            risks, ai_available, *rest = run_gemini_red_team(text)
             assert ai_available is True
             assert len(risks) == 3
 
@@ -285,10 +285,10 @@ def test_gemini_fallback_on_503(db_session: Session, caplog):
                     mock_client.models.generate_content.side_effect = mock_generate
 
                     with caplog.at_level(logging.INFO, logger="brandpilot.audit.gemini"):
-                        findings, ai_available = run_gemini_brand_audit(asset.body, guideline_v, facts)
+                        findings, ai_available, *rest = run_gemini_brand_audit(asset.body, guideline_v, facts)
                         assert ai_available is True
                         assert models_called == ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
-                        assert any("Gemini model 'gemini-2.5-flash-lite' answered" in r.message for r in caplog.records)
+                        assert any(("answered" in r.message or "succeeded" in r.message) and "gemini-2.5-flash-lite" in r.message for r in caplog.records)
 
 
 def test_gemini_fallback_on_timeout(db_session: Session, caplog):
@@ -315,10 +315,10 @@ def test_gemini_fallback_on_timeout(db_session: Session, caplog):
                     mock_client.models.generate_content.side_effect = mock_generate
 
                     with caplog.at_level(logging.INFO, logger="brandpilot.audit.gemini"):
-                        findings, ai_available = run_gemini_brand_audit(asset.body, guideline_v, facts)
+                        findings, ai_available, *rest = run_gemini_brand_audit(asset.body, guideline_v, facts)
                         assert ai_available is True
                         assert models_called == ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
-                        assert any("Gemini model 'gemini-2.5-flash-lite' answered" in r.message for r in caplog.records)
+                        assert any(("answered" in r.message or "succeeded" in r.message) and "gemini-2.5-flash-lite" in r.message for r in caplog.records)
 
 
 def test_gemini_no_retry_on_400_invalid_argument(db_session: Session):
@@ -340,7 +340,7 @@ def test_gemini_no_retry_on_400_invalid_argument(db_session: Session):
                     mock_client_cls.return_value = mock_client
                     mock_client.models.generate_content.side_effect = mock_generate
 
-                    findings, ai_available = run_gemini_brand_audit(asset.body, guideline_v, facts)
+                    findings, ai_available, *rest = run_gemini_brand_audit(asset.body, guideline_v, facts)
                     assert ai_available is False
                     assert len(findings) == 0
                     assert models_called == ["gemini-2.5-flash"], "Non-retryable 400 error should not invoke fallback"
@@ -362,7 +362,7 @@ def test_gemini_red_team_fallback_and_ai_unavailable():
                     mock_client_cls.return_value = mock_client
                     mock_client.models.generate_content.side_effect = mock_generate
 
-                    risks, ai_available = run_gemini_red_team(text)
+                    risks, ai_available, *rest = run_gemini_red_team(text)
                     assert ai_available is False
                     assert len(risks) == 0
                     assert models_called == ["gemini-2.5-flash", "gemini-2.5-flash-lite"]

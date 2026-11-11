@@ -5,10 +5,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     DATABASE_URL: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
-    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
-    GEMINI_FALLBACK_MODELS: str = "gemini-3.5-flash"
+    GEMINI_MODEL: str = "gemini-3.8-flash"
+    GEMINI_FALLBACK_MODELS: str = "gemini-3.5-flash,gemini-3.1-flash-lite"
+    GEMINI_TIMEOUT_SECONDS: int = 30
     SECRET_KEY: str = "brandpilot-insecure-dev-secret-key-change-in-prod-12345"
     PUBLIC_BASE_URL: str = "http://localhost:8000"
+    DEMO_MODE: bool = True
+    CRON_SECRET: Optional[str] = None
+    EXPIRY_CHECK_INTERVAL_MINUTES: int = 60
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -30,6 +34,9 @@ class Settings(BaseSettings):
         url = self.DATABASE_URL.strip()
         if url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql://", 1)
+        if "supabase.co" in url and "sslmode=" not in url:
+            sep = "&" if "?" in url else "?"
+            url = f"{url}{sep}sslmode=require"
         return url
 
 
