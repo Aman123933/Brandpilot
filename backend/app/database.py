@@ -4,13 +4,16 @@ from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from backend.app.config import settings
 
 db_url = settings.sqlalchemy_database_url
-connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
+is_sqlite = db_url.startswith("sqlite")
+connect_args = {"check_same_thread": False} if is_sqlite else {}
+engine_kwargs = {"echo": False, "future": True}
+if not is_sqlite:
+    engine_kwargs["pool_pre_ping"] = True
 
 engine = create_engine(
     db_url,
     connect_args=connect_args,
-    echo=False,
-    future=True,
+    **engine_kwargs,
 )
 
 SessionLocal = sessionmaker(

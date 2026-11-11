@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from backend.app.models import (
     Organization,
@@ -10,15 +11,70 @@ from backend.app.models import (
     GuidelineVersion,
     ContentAsset,
     AssetRevision,
+    Finding,
+    Approval,
+    Passport,
+    AssetFactLink,
+    AssetGuidelineLink,
+    Notification,
+    ActivityLog,
+    LoginAttempt,
+    ReplayRun,
+    ExpiryRun,
+    AiCache,
+    AiCallLog,
 )
+from backend.app.auth import hash_password
 
 
-def seed_database(db: Session) -> bool:
+def seed_database(db: Session, force_reset: bool = False) -> bool:
+    if force_reset:
+        # Clear all tables in dependency order
+        db.query(AiCallLog).delete()
+        db.query(AiCache).delete()
+        db.query(ReplayRun).delete()
+        db.query(ExpiryRun).delete()
+        db.query(LoginAttempt).delete()
+        db.query(Notification).delete()
+        db.query(ActivityLog).delete()
+        db.query(AssetGuidelineLink).delete()
+        db.query(AssetFactLink).delete()
+        db.query(Passport).delete()
+        db.query(Approval).delete()
+        db.query(Finding).delete()
+        db.query(AssetRevision).delete()
+        db.query(ContentAsset).delete()
+        db.query(FactVersion).delete()
+        db.query(Fact).delete()
+        db.query(GuidelineVersion).delete()
+        db.query(Guideline).delete()
+        db.query(User).delete()
+        db.query(Organization).delete()
+        db.commit()
+
     existing_org = db.query(Organization).filter(Organization.slug == "kestrel-audio").first()
+    now = datetime.now(timezone.utc)
+
     if existing_org:
+        # Ensure demo passwords, rule ids, and dB bug fix are present idempotently
+        demo_pwd_hash, demo_salt = hash_password("Demo@2026")
+        users = db.query(User).filter(User.org_id == existing_org.id).all()
+        for u in users:
+            if not u.password_hash:
+                u.password_hash = demo_pwd_hash
+                u.salt = demo_salt
+
+        # Fix dB dB bug on any existing anc fact version
+        anc_fact = db.query(Fact).filter(Fact.org_id == existing_org.id, Fact.key == "anc_noise_reduction").first()
+        if anc_fact:
+            for v in anc_fact.versions:
+                if v.value and v.value.endswith(" dB"):
+                    v.value = v.value[:-3].strip()
+
+        db.commit()
         return False
 
-    now = datetime.now(timezone.utc)
+    demo_pwd_hash, demo_salt = hash_password("Demo@2026")
 
     org = Organization(
         name="Kestrel Audio",
@@ -33,6 +89,8 @@ def seed_database(db: Session) -> bool:
         name="Maya Lin",
         email="maya@kestrelaudio.com",
         role="brand_manager",
+        password_hash=demo_pwd_hash,
+        salt=demo_salt,
         created_at=now,
     )
     dev = User(
@@ -40,6 +98,8 @@ def seed_database(db: Session) -> bool:
         name="Dev Patel",
         email="dev@kestrelaudio.com",
         role="creator",
+        password_hash=demo_pwd_hash,
+        salt=demo_salt,
         created_at=now,
     )
     sana = User(
@@ -47,6 +107,8 @@ def seed_database(db: Session) -> bool:
         name="Sana Miller",
         email="sana@kestrelaudio.com",
         role="reviewer",
+        password_hash=demo_pwd_hash,
+        salt=demo_salt,
         created_at=now,
     )
     db.add_all([maya, dev, sana])
@@ -83,7 +145,7 @@ def seed_database(db: Session) -> bool:
         },
         {
             "key": "anc_noise_reduction",
-            "value": "up to 32 dB",
+            "value": "up to 32",  # Fixed dB dB bug: value is 'up to 32', unit is 'dB'
             "unit": "dB",
             "source_note": "Anechoic chamber active noise cancellation test certification",
             "valid_until": now + timedelta(days=365),
@@ -133,23 +195,34 @@ def seed_database(db: Session) -> bool:
     rules_json = {
         "banned_terms": [
             {
+                "id": "BT-001",
                 "term": "cheap",
                 "why": "Undermines premium acoustic perception and craftsmanship",
                 "preferred": "affordable",
+                "owner_id": maya.id,
             },
             {
+                "id": "BT-002",
                 "term": "best in the world",
                 "why": "Unsubstantiated superlative violating brand truth standards",
                 "preferred": "industry-leading",
+                "owner_id": maya.id,
             },
             {
+                "id": "BT-003",
                 "term": "guaranteed",
                 "why": "Creates absolute legal warranties outside official terms",
                 "preferred": "backed by our warranty",
+                "owner_id": maya.id,
             },
         ],
         "required_phrases": [
-            "Kestrel One",
+            {
+                "id": "RP-001",
+                "phrase": "Kestrel One",
+                "why": "Official product name required on all copy",
+                "owner_id": maya.id,
+            },
         ],
         "tone_notes": [
             "confident",
@@ -158,12 +231,18 @@ def seed_database(db: Session) -> bool:
         ],
         "claim_rules": [
             {
+                "id": "CR-001",
                 "pattern": "% better",
                 "requires_fact_key": None,
+                "why": "Comparative performance claims must cite certified testing",
+                "owner_id": maya.id,
             },
             {
+                "id": "CR-002",
                 "pattern": "#1",
                 "requires_fact_key": None,
+                "why": "Market leadership claims require external benchmark verification",
+                "owner_id": maya.id,
             },
         ],
     }
@@ -178,6 +257,9 @@ def seed_database(db: Session) -> bool:
             "Every performance claim must be verified against approved brand facts."
         ),
         rules=rules_json,
+        change_note="Initial active brand guidelines v1",
+        status="active",
+        created_by_id=maya.id,
         created_at=now,
         is_active=True,
     )
