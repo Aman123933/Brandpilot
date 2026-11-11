@@ -1,15 +1,18 @@
 import os
+import sys
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from backend.app.config import settings
 from backend.app.database import engine, Base, SessionLocal
 from backend.app.seed import seed_database
 from backend.app.services.recall import check_expired_facts
+from backend.app.scheduler import start_scheduler, stop_scheduler
 from backend.app.routers import (
     auth,
     health,
@@ -21,6 +24,8 @@ from backend.app.routers import (
     passports,
     notifications,
     admin,
+    insights,
+    cron,
 )
 
 logger = logging.getLogger("brandpilot")
@@ -34,43 +39,36 @@ FRONTEND_DIST = os.path.abspath(
 def check_gemini_startup():
     if not settings.GEMINI_API_KEY or not settings.GEMINI_API_KEY.strip():
         logger.info("[BrandPilot Startup] GEMINI_API_KEY is not set. Operating in deterministic rule mode only.")
-        return
-
-    logger.info(
-        f"[BrandPilot Startup] GEMINI_API_KEY is set. Testing connectivity with model '{settings.GEMINI_MODEL}'..."
-    )
-    try:
-        from google import genai
-        client = genai.Client(api_key=settings.GEMINI_API_KEY.strip())
-        response = client.models.generate_content(
-            model=settings.GEMINI_MODEL,
-            contents="ping",
-        )
-        if response and response.text:
-            logger.info(
-                f"[BrandPilot Startup] Gemini test call SUCCEEDED with model '{settings.GEMINI_MODEL}'. Generative AI features enabled."
-            )
-        else:
-            logger.warning(
-                f"[BrandPilot Startup] Gemini test call returned empty content with model '{settings.GEMINI_MODEL}'."
-            )
-    except Exception as exc:
-        logger.warning(
-            f"[BrandPilot Startup] Gemini test call FAILED with model '{settings.GEMINI_MODEL}': {exc}. Operating with deterministic rule checks only."
+    else:
+        logger.info(
+            f"[BrandPilot Startup] GEMINI_API_KEY configured. Model: {settings.GEMINI_MODEL}, Fallbacks: {settings.GEMINI_FALLBACK_MODELS}"
         )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    # During pytest automated testing, avoid background schedulers, network pings,
+    # and touching the default disk engine (tests manage their own in-memory DB).
+    is_testing = bool(
+        "pytest" in sys.modules
+        or os.getenv("PYTEST_CURRENT_TEST")
+        or os.getenv("TESTING")
+    )
 
-    with SessionLocal() as db:
-        seed_database(db)
-        check_expired_facts(db)
+    if not is_testing:
+        Base.metadata.create_all(bind=engine)
 
-    check_gemini_startup()
+        with SessionLocal() as db:
+            seed_database(db)
+            check_expired_facts(db, source="startup")
+
+        start_scheduler()
+        check_gemini_startup()
 
     yield
+
+    if not is_testing:
+        stop_scheduler()
 
 
 app = FastAPI(
@@ -79,6 +77,32 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Global JSON Exception Handlers
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": exc.errors()},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled server error on {request.method} {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal server error"},
+    )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -98,6 +122,8 @@ app.include_router(reviews.router)
 app.include_router(passports.router)
 app.include_router(notifications.router)
 app.include_router(admin.router)
+app.include_router(insights.router)
+app.include_router(cron.router)
 
 static_dir = os.path.join(FRONTEND_DIST, "static")
 if os.path.exists(static_dir):
@@ -108,7 +134,6 @@ if os.path.exists(static_dir):
 def root(request: Request):
     index_file = os.path.join(FRONTEND_DIST, "index.html")
     accept = request.headers.get("accept", "")
-    # If requested by a browser navigation or explicitly requests HTML, serve SPA
     if os.path.exists(index_file) and (
         "text/html" in accept or request.headers.get("sec-fetch-dest") == "document"
     ):
@@ -123,36 +148,18 @@ def root(request: Request):
     }
 
 
-API_ROUTE_PREFIXES = (
-    "auth",
-    "facts",
-    "guidelines",
-    "assets",
-    "findings",
-    "reviews",
-    "passports",
-    "notifications",
-    "admin",
-    "health",
-    "docs",
-    "redoc",
-    "openapi.json",
-    "static",
-)
-
-
-@app.get("/{full_path:path}", include_in_schema=False)
-async def spa_fallback(request: Request, full_path: str):
-    first_segment = full_path.split("/")[0]
-    if first_segment in API_ROUTE_PREFIXES:
-        raise HTTPException(status_code=404, detail="Not Found")
-
-    target_file = os.path.join(FRONTEND_DIST, full_path)
-    if os.path.isfile(target_file):
-        return FileResponse(target_file)
-
+# Dedicated SPA routes allowed per contract
+@app.get("/login", include_in_schema=False)
+@app.get("/app/{full_path:path}", include_in_schema=False)
+@app.get("/verify/{full_path:path}", include_in_schema=False)
+async def spa_allowed_routes(request: Request):
     index_file = os.path.join(FRONTEND_DIST, "index.html")
     if os.path.exists(index_file):
         return FileResponse(index_file)
+    raise HTTPException(status_code=404, detail="Frontend build not found")
 
+
+# Catch-all unknown paths -> return JSON 404 (never HTML)
+@app.get("/{full_path:path}", include_in_schema=False)
+async def catch_all_fallback(full_path: str):
     raise HTTPException(status_code=404, detail="Not Found")
