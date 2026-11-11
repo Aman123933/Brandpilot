@@ -13,8 +13,34 @@ BrandPilot is an enterprise brand-governance and provenance platform. It prevent
 - **API Documentation**: `https://brandpilot-3n2y.onrender.com/docs`
 - **Public Verification**: `https://brandpilot-3n2y.onrender.com/verify/<PASSPORT_CODE>`
 
+---
 
-## Table of Contents
+## Demo Accounts
+
+The database comes pre-seeded with the **Kestrel Audio** brand workspace. You can log in using either the interactive one-click selector or email + password:
+
+| Name | Email | Password | Role | What to Try |
+|---|---|---|---|---|
+| **Maya Lin** | `maya@kestrelaudio.com` | `Demo@2026` | `brand_manager` | • Draft a new guideline version in Brand Git<br>• View semantic rule diff & run deterministic replay<br>• Activate version & view Executive Insights dashboard<br>• View claim expiry status (`/admin/expiry-status`) |
+| **Dev Patel** | `dev@kestrelaudio.com` | `Demo@2026` | `creator` | • Ingest `.txt`, `.docx`, or `.pdf` copy<br>• Run pre-flight brand audit & one-click accept fixes<br>• Run Brand Red Team adversarial simulation<br>• Submit content asset for reviewer approval |
+| **Sana Miller** | `sana@kestrelaudio.com` | `Demo@2026` | `reviewer` | • Open the Reviewer Queue<br>• Inspect open findings and issue official Brand Passport<br>• Generate public verification QR code<br>• Formally withdraw passport with required reason |
+
+---
+
+## Environment Variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DATABASE_URL` | `sqlite:///./brandpilot.db` | PostgreSQL connection URL (e.g. Supabase). Defaults to SQLite if unset. |
+| `GEMINI_API_KEY` | *(unset)* | Google Gemini API key. If unset, operates in 100% deterministic rule mode. |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Primary Gemini model for AI audit and red-team assist. |
+| `GEMINI_FALLBACK_MODELS` | `gemini-3.5-flash,gemini-3.1-flash-lite` | Comma-separated fallback models tried sequentially on 429/503/timeout. |
+| `GEMINI_TIMEOUT_SECONDS` | `30` | Per-call deadline for Gemini API calls in seconds. |
+| `SECRET_KEY` | `brandpilot-insecure-dev-...` | Secret key for signing demo JWT authentication tokens. |
+| `PUBLIC_BASE_URL` | `http://localhost:8000` | Public deployment URL (used for QR codes and public verify links). |
+| `DEMO_MODE` | `true` | Enables `/auth/demo-credentials` and `/admin/reset-demo`. |
+| `CRON_SECRET` | *(unset)* | Secret required in `X-Cron-Secret` header for `POST /cron/expiry`. |
+| `EXPIRY_CHECK_INTERVAL_MINUTES` | `60` | In-process APScheduler background check interval in minutes. |
 
 1. [Workflow & Key Concepts](#workflow--key-concepts)
 2. [Architecture Overview](#architecture-overview)
@@ -193,46 +219,46 @@ The frontend application will start at:
 
 ---
 
-## Deployment (Render & Hugging Face Spaces)
+## Deployment (Render + Supabase PostgreSQL)
 
-BrandPilot supports single-link deployment where FastAPI directly serves the pre-built React SPA (`frontend/dist`) along with all API endpoints and public verification routes (`/verify/:code`).
+BrandPilot supports single-link unified deployment where FastAPI directly serves the pre-built React SPA (`frontend/dist`) along with all API endpoints, SPA routes (`/login`, `/app/*`, `/verify/*`), and public verification pages.
 
-### Option A: Render Free Web Service (Recommended)
+### Deploying to Render with Supabase PostgreSQL
 
-1. Connect your repository to **[Render](https://render.com/)**.
-2. Click **New +** -> **Blueprint**, and select your repository containing `render.yaml`.
-3. Configure the environment variables:
-   - `GEMINI_API_KEY`: Your key from Google AI Studio (optional).
-   - `GEMINI_MODEL`: `gemini-2.5-flash` (or your chosen primary model).
-   - `GEMINI_FALLBACK_MODELS`: `gemini-2.5-flash-lite` (optional fallback list).
-   - `DATABASE_URL`: Optional (defaults to zero-setup SQLite; provide Supabase PostgreSQL URL for persistent multi-instance production).
-   - `PUBLIC_BASE_URL`: The public URL assigned by Render (e.g., `https://brandpilot.onrender.com`).
-4. Click **Apply Blueprint**. Render will build the multi-stage Docker container and launch the web service on port 8000.
-5. *Cold Start Note*: Free Render instances spin down after inactivity. The frontend automatically shows a "Waking the server (about 30 seconds)" indicator while the instance boots.
+1. **Create Free Supabase Database**:
+   - Follow the step-by-step click-by-click instructions in [docs/SUPABASE_SETUP.md](file:///c:/Users/AMAN/OneDrive/Desktop/brandpilot/docs/SUPABASE_SETUP.md).
+   - Copy your URI connection string (e.g. `postgresql://postgres:[PASSWORD]@db.xxxx.supabase.co:5432/postgres`).
+2. **Deploy via Render Blueprint**:
+   - Connect your GitHub repository to **[Render](https://render.com/)**.
+   - Click **New +** -> **Blueprint**, and select this repository containing `render.yaml`.
+   - Set the environment variables:
+     - `DATABASE_URL`: Your Supabase connection string.
+     - `GEMINI_API_KEY`: *(Optional)* Your key from Google AI Studio.
+     - `GEMINI_MODEL`: `gemini-3.8-flash`.
+     - `GEMINI_FALLBACK_MODELS`: `gemini-3.5-flash,gemini-3.1-flash-lite`.
+     - `PUBLIC_BASE_URL`: The public URL assigned by Render (e.g. `https://brandpilot-3n2y.onrender.com`).
+     - `CRON_SECRET`: A secure random token for securing external cron sweeps.
+   - Click **Apply Blueprint**. Render builds the multi-stage Docker container and launches the web service.
+3. **Database Auto-Seeding**:
+   - On startup, BrandPilot automatically runs table migrations and idempotent seeding.
+   - Verify health at `https://your-service.onrender.com/health` (will report `database_engine: "postgresql"`).
 
-### Option B: Hugging Face Docker Space (Fallback)
+---
 
-1. Create a new **Space** on **[Hugging Face](https://huggingface.co/new-space)**.
-2. Select **Docker** as the Space SDK (Blank).
-3. Push this repository to the Hugging Face Space git remote.
-4. Add the following header to the Space's `README.md` frontmatter:
-   ```yaml
-   ---
-   title: BrandPilot
-   emoji: 🛡️
-   colorFrom: amber
-   colorTo: red
-   sdk: docker
-   app_port: 8000
-   pinned: false
-   ---
-   ```
-5. In **Settings -> Variables and Secrets**, configure:
-   - Secret `GEMINI_API_KEY`: Your Google AI Studio key.
-   - Secret `SECRET_KEY`: A secure random secret.
-   - Variable `GEMINI_MODEL`: `gemini-2.5-flash`.
-   - Variable `GEMINI_FALLBACK_MODELS`: `gemini-2.5-flash-lite`.
-   - Variable `PUBLIC_BASE_URL`: `https://<your-username>-brandpilot.hf.space`.
+## Automated Expiry & External Cron Setup
+
+Render free web services sleep after 15 minutes of inactivity. BrandPilot provides a multi-tier expiration monitoring strategy:
+
+1. **In-Process Scheduler**: Runs every `EXPIRY_CHECK_INTERVAL_MINUTES` (default: 60) while the service is active.
+2. **Startup Verification**: Immediately sweeps for expired facts whenever the service boots or wakes up.
+3. **Lazy Throttled Sweep**: When signed-in users load facts or assets, a check runs lazily at most once every 10 minutes.
+4. **Secured External Cron**:
+   - Set up a free recurring ping on [cron-job.org](https://cron-job.org) or GitHub Actions:
+     - **URL**: `https://your-service.onrender.com/cron/expiry`
+     - **Method**: `POST`
+     - **Header**: `X-Cron-Secret: <YOUR_CRON_SECRET>`
+     - **Schedule**: Every 60 minutes.
+   - This keeps the instance fresh and ensures timely claim recall notifications without manual intervention.
 
 ---
 
@@ -306,30 +332,42 @@ BrandPilot comes pre-seeded with the **Kestrel Audio** brand workspace:
 
 ## Testing & Verification
 
-### 1. Pytest Backend Suite (47 Tests)
+### 1. Pytest Backend Suite (65 Tests, 89% Coverage)
 
-Runs all unit, regression, RBAC, deterministic rule, and recall tests:
+Runs all unit, regression, RBAC, deterministic rule, contract, and Brand Git tests:
 
 ```bash
-pytest backend -v
+# Run full test suite
+.venv\Scripts\python -m pytest backend/tests -v
+
+# Run with coverage report
+.venv\Scripts\python -m pytest backend/tests --cov=backend/app --cov-report=term-missing
 ```
 
 ### 2. End-to-End Story Smoke Test (`scripts/smoke_test.py`)
 
-Walks the complete core story against a target base URL:
+Walks the complete 15-step core story against a target base URL:
 
 ```bash
 python scripts/smoke_test.py --base-url http://localhost:8000
 ```
 
 Steps executed and verified:
-1. Pre-flight audit on planted sample asset (identifies banned words & fact mismatches).
-2. Accept suggested fixes (creates new revision with corrections).
-3. Submit asset for reviewer approval.
-4. Reviewer approves asset and issues Passport.
-5. Verify passport status is VALID with linked ground-truth facts.
-6. Fact evolution: brand manager bumps a fact version, triggering automatic recall to REVIEW REQUIRED.
-7. Public verification: fetch logged-out public passport verifying status and clean metadata.
+1. Demo identities setup & authentication
+2. Pre-flight audit on planted sample asset (identifies banned words & fact mismatches).
+3. Accept suggested fixes (creates new revision with corrections).
+4. Submit asset for reviewer approval.
+5. Reviewer approves asset and issues Brand Passport.
+6. Verify passport status is VALID with linked ground-truth facts.
+7. Fact evolution: brand manager bumps a fact version, triggering automatic recall to REVIEW REQUIRED.
+8. Public verification: fetch logged-out public passport verifying status and clean metadata.
+9. Brand Git: draft new proposed guideline version.
+10. Brand Git: compute semantic rule diff between active and draft versions.
+11. Brand Git: run deterministic replay over assets (zero Gemini quota consumed).
+12. Brand Git: activate guideline version (archives previous active version).
+13. Executive Insights: query SQL-aggregated overview & violations trends.
+14. Expiry Telemetry: inspect admin expiry status and upcoming claim timelines.
+15. Passport Revocation: withdraw passport with required human reason.
 
 ### 3. Comprehensive Verification Suite (`verify_endpoints.py`)
 

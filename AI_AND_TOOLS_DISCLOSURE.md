@@ -4,37 +4,53 @@ In the spirit of complete transparency, this document lists every third-party li
 
 ---
 
-## 1. Generative AI Models & Services
+## 1. Generative AI Models & Services in Product
 
-- **Google Gemini API (`google-genai` SDK v2.x)**:
-  - Used for optional pre-flight semantic claim verification (substantiating claims against provided brand ground-truth facts).
-  - Used for Brand Red-Team adversarial simulations across 3 personas (*Critical Journalist*, *Competitor*, and *Skeptical Customer*).
-  - Configurable model parameter (`GEMINI_MODEL`, e.g. `gemini-2.5-flash`).
-  - **Graceful Degradation**: If `GEMINI_API_KEY` is not provided or API calls fail, BrandPilot automatically runs in deterministic mode. No fake or mocked fallback results are fabricated; deterministic regex rules, banned vocabulary lists, and expired fact checks execute, and an informative banner is displayed in the UI indicating that generative AI features are disabled.
+- **Google Gemini API (`google-genai` SDK)**:
+  - **Where Used**:
+    1. Pre-flight tone and claim assist (`POST /assets/{id}/audit`).
+    2. Brand Red-Team adversarial simulation across 3 distinct personas (`POST /assets/{id}/redteam`): *Critical Journalist*, *Competitor*, and *Skeptical Customer*.
+  - **Models & Hierarchy**:
+    - **Primary Model**: `gemini-3.8-flash` (fast, structured JSON reasoning).
+    - **Fallback Models**: `gemini-3.5-flash`, `gemini-3.1-flash-lite` (tried in sequence upon failure).
+    - **Timeout**: 30-second per-call deadline (`GEMINI_TIMEOUT_SECONDS`).
+  - **Prompts**:
+    - Brand Audit: `BRAND_AUDIT_SYSTEM_PROMPT` enforces strict JSON schema output with start/end character offsets, quote verification against source text, and severity ratings (`high`, `medium`, `low`).
+    - Red Team: `RED_TEAM_SYSTEM_PROMPT` simulates adversarial scrutiny, requiring unverified claims to be labeled `Unverified` (never false accusations).
+  - **Failure Modes & Fallback Chains**:
+    - **429 Rate Limit / 503 Overload / Timeout**: Automatically retries the next model in the fallback chain.
+    - **400 Bad Request / Invalid Config**: Immediately halts without burning fallback quotas.
+    - **All Fallbacks Failed**: Gracefully returns `ai_available=False` with an informative, human-readable `ai_message`. Deterministic rules continue to execute completely.
+    - **Missing API Key**: Operates seamlessly in 100% deterministic mode.
+  - **Quota Preservation Protections**:
+    - **Zero Quota in Brand Git Replay**: Deterministic replay over corpora never calls Gemini.
+    - **Persistent Cache (`AiCache`)**: SHA-256 hash-keyed caching in database eliminates duplicate API calls for identical content.
+    - **Rate Limit (`AiCallLog`)**: Enforces maximum 5 AI calls per hour per user.
 
 ---
 
 ## 2. AI Coding Assistants & Development Tools
 
-- **Antigravity (Google DeepMind)**:
-  - Agentic pair programming assistant used for repository scaffolding, API endpoint implementation, test authoring, styling refinement, and deployment packaging.
+- **Google Antigravity (Google DeepMind)**: Agentic pair programming assistant used for codebase architecture, backend endpoint engineering, contract compliance verification, test generation, and deployment configuration.
+- **Claude (Anthropic)**: LLM reasoning and code design assistance.
+- **Cursor**: AI-powered code editor utilized for navigation and interactive refactoring.
 
 ---
 
 ## 3. Backend Technologies & Libraries (Python 3.11+)
 
-- **FastAPI (`fastapi >= 0.115.0`)**: High-performance asynchronous web framework providing OpenAPI schemas and routing.
-- **Uvicorn (`uvicorn[standard] >= 0.30.0`)**: Lightning-fast ASGI production web server.
+- **FastAPI (`fastapi >= 0.115.0`)**: Asynchronous web framework providing OpenAPI schemas and routing.
+- **Uvicorn (`uvicorn[standard] >= 0.30.0`)**: High-performance ASGI production web server.
+- **APScheduler (`apscheduler >= 3.11.0`)**: In-process background scheduler for automated claim expiration checks.
+- **psycopg2-binary (`psycopg2-binary >= 2.9.10`)**: PostgreSQL database adapter with connection pooling (`pool_pre_ping`).
 - **Pydantic v2 (`pydantic >= 2.7.0`, `pydantic-settings >= 2.3.0`)**: Strict data validation and environment variable configuration.
-- **SQLAlchemy 2.0 (`sqlalchemy >= 2.0.30`)**: Modern SQL toolkit and Object Relational Mapper (supporting both SQLite and PostgreSQL).
-- **PyJWT (`pyjwt >= 2.8.0`)**: RFC 7519 JSON Web Token signing and verification for role-based authentication.
-- **python-docx (`python-docx >= 1.1.0`)**: Microsoft Word (`.docx`) file intake parsing.
-- **PyMuPDF (`pymupdf >= 1.24.0`)**: High-performance PDF document text extraction.
+- **SQLAlchemy 2.0 (`sqlalchemy >= 2.0.30`)**: Database ORM supporting both SQLite and PostgreSQL (Supabase).
+- **PyJWT (`pyjwt >= 2.8.0`)**: RFC 7519 JSON Web Token authentication.
+- **python-docx (`python-docx >= 1.1.0`)**: Microsoft Word (`.docx`) parsing.
+- **PyMuPDF (`pymupdf >= 1.24.0`)**: PDF document text extraction.
 - **python-multipart (`python-multipart >= 0.0.12`)**: Form-data handling for file uploads.
-- **qrcode (`qrcode[pil] >= 8.0`)**: Scannable PNG QR code generation encoding public verification passport URLs.
-- **python-dotenv (`python-dotenv >= 1.0.1`)**: Local environment variable configuration loader.
-- **requests (`requests >= 2.31.0`)**: HTTP client for smoke tests and connectivity checks.
-- **pytest (`pytest >= 8.2.0`)**: Unit and integration test framework.
+- **qrcode (`qrcode[pil] >= 8.0`)**: SVG and PNG QR code generation.
+- **pytest & pytest-cov (`pytest >= 8.2.0`, `pytest-cov >= 7.0.0`)**: Automated test runner and code coverage measurement.
 
 ---
 

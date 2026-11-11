@@ -1185,3 +1185,138 @@ Lists notifications for the authenticated user ordered newest first.
 Marks a notification as read (`read = true`).
 
 **Response `200 OK`**: Returns updated `NotificationOut`.
+
+---
+
+### 11. Authentication & Credentials (Round 3)
+
+#### `GET /auth/demo-credentials`
+Returns list of demo user credentials when `DEMO_MODE=true` (empty list when `false`).
+
+**Response `200 OK`**:
+```json
+[
+  {
+    "name": "Maya Lin",
+    "email": "maya@kestrelaudio.com",
+    "password": "Demo@2026",
+    "role": "brand_manager",
+    "description": "Owns facts, guidelines and Brand Git"
+  },
+  {
+    "name": "Dev Patel",
+    "email": "dev@kestrelaudio.com",
+    "password": "Demo@2026",
+    "role": "creator",
+    "description": "Drafts and submits content assets for review"
+  },
+  {
+    "name": "Sana Miller",
+    "email": "sana@kestrelaudio.com",
+    "password": "Demo@2026",
+    "role": "reviewer",
+    "description": "Audits submissions and issues passports"
+  }
+]
+```
+
+#### `POST /auth/login`
+Authenticates with email and password (PBKDF2-HMAC-SHA256, 210,000 iterations). Throttled: 5 failures within 10 minutes returns 429 Too Many Requests.
+
+**Request Body**:
+```json
+{
+  "email": "maya@kestrelaudio.com",
+  "password": "Demo@2026"
+}
+```
+
+**Response `200 OK`**: Returns `TokenResponse` with `access_token`, `token_type`, and `user`.
+
+#### `GET /auth/me`
+Returns current authenticated user details.
+
+---
+
+### 12. Brand Git Endpoints
+
+#### `GET /guidelines/{id}/versions`
+Lists all versions of guideline with metadata, change notes, rule summaries, and latest replay summary.
+
+#### `GET /guidelines/{id}/diff?from=A&to=B`
+Returns semantic diff between versions A and B.
+
+**Response `200 OK`**:
+```json
+{
+  "guideline_id": 1,
+  "from_version": 1,
+  "to_version": 2,
+  "summary": { "added": 1, "removed": 0, "changed": 0 },
+  "changes": [
+    {
+      "kind": "added",
+      "section": "banned_terms",
+      "rule_id": "BT-004",
+      "before": null,
+      "after": { "term": "unrivaled", "why": "Unsubstantiated absolute claim" }
+    }
+  ]
+}
+```
+
+#### `POST /guidelines/{id}/versions/{v}/replay`
+Runs deterministic replay (never calls Gemini) against assets comparing proposed version `v` with currently active version.
+
+#### `GET /guidelines/{id}/versions/{v}/replay`
+Retrieves stored replay run results for version `v`.
+
+#### `POST /guidelines/{id}/versions/{v}/activate`
+Activates version `v`. Requires a stored replay first (returns 400 if no replay exists; 409 if already active).
+
+#### `POST /guidelines/{id}/versions/{v}/reject`
+Rejects proposed version `v` with a required note (returns 409 if already active or archived).
+
+---
+
+### 13. Insights & Analytics Endpoints
+
+#### `GET /insights/overview`
+SQL-aggregated dashboard overview: totals, compliance rate, pending approvals, average hours to decision, outdated content items, findings by kind and severity.
+
+#### `GET /insights/violations?days=30`
+Violations trends: `top_rules`, `by_day`, and `by_creator` over the requested time window (7, 30, or 90 days).
+
+#### `GET /insights/disputed-rules`
+List of rules with dismissed findings count, assisting brand managers in identifying contested rules.
+
+#### `GET /insights/assets`
+Asset health matrix: title, status, passport status, open high findings, open total findings, last audit timestamp, and compliance indicator.
+
+---
+
+### 14. Cron & Expiry Telemetry
+
+#### `GET /admin/expiry-status`
+Returns expiry telemetry: last run time, last run source (`startup`, `scheduler`, `manual`, `cron`, `lazy`), interval in minutes, and upcoming expirations in the next 7, 14, and 30 days.
+
+#### `POST /cron/expiry`
+Secured endpoint for external cron services. Requires header `X-Cron-Secret` matching server configuration. Runs expiry check and returns affected assets count.
+
+#### `POST /admin/reset-demo`
+Restores database to seeded demo state. Only enabled when `DEMO_MODE=true` (disabled with 403 when `DEMO_MODE=false`). Manager only.
+
+---
+
+### 15. Passport Withdrawal
+
+#### `POST /passports/{code}/withdraw`
+Formally revokes a passport with a mandatory reason. Returns 409 Conflict if already withdrawn.
+
+**Request Body**:
+```json
+{
+  "reason": "Campaign discontinued due to specification updates"
+}
+```
+
