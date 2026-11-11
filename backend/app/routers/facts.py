@@ -14,7 +14,11 @@ from backend.app.schemas import (
     ImpactPreviewResponse,
 )
 from backend.app.auth import get_current_user, require_roles
-from backend.app.services.recall import recall_for_fact_version, get_fact_impact_preview
+from backend.app.services.recall import (
+    recall_for_fact_version,
+    get_fact_impact_preview,
+    lazy_throttled_check_expired_facts,
+)
 
 router = APIRouter(prefix="/facts", tags=["Facts"])
 
@@ -36,6 +40,7 @@ def list_facts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    lazy_throttled_check_expired_facts(db)
     facts = (
         db.query(Fact)
         .filter(Fact.org_id == current_user.org_id)

@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 
@@ -12,6 +12,7 @@ from backend.app.models import (
     Notification,
     ActivityLog,
     User,
+    ExpiryRun,
 )
 from backend.app.schemas import ImpactPreviewItem, ImpactPreviewResponse
 
@@ -276,7 +277,26 @@ def recall_for_fact_version(
     return affected_items
 
 
-def check_expired_facts(db: Session, actor_id: Optional[int] = None) -> List[ImpactPreviewItem]:
+_last_lazy_check: Optional[datetime] = None
+
+
+def lazy_throttled_check_expired_facts(db: Session):
+    """Runs lazy throttled expiry check (max once per 10 minutes)."""
+    global _last_lazy_check
+    now = datetime.now(timezone.utc)
+    if _last_lazy_check is None or (now - _last_lazy_check) > timedelta(minutes=10):
+        _last_lazy_check = now
+        try:
+            check_expired_facts(db, source="lazy")
+        except Exception:
+            pass
+
+
+def check_expired_facts(
+    db: Session,
+    actor_id: Optional[int] = None,
+    source: str = "manual",
+) -> List[ImpactPreviewItem]:
     """Check for expired facts and recall any approved assets that rely on them."""
     now = datetime.now(timezone.utc)
     expired_versions = (
@@ -286,83 +306,100 @@ def check_expired_facts(db: Session, actor_id: Optional[int] = None) -> List[Imp
     )
     expired_versions = [v for v in expired_versions if _is_expired(v.valid_until)]
 
-    if not expired_versions:
-        return []
-
     seen_asset_ids = set()
     affected_items: List[ImpactPreviewItem] = []
 
-    for fv in expired_versions:
-        fact = db.query(Fact).filter(Fact.id == fv.fact_id).first()
-        if not fact:
-            continue
-
-        links = (
-            db.query(AssetFactLink)
-            .filter(AssetFactLink.fact_version_id == fv.id)
-            .all()
-        )
-
-        for link in links:
-            if link.asset_id in seen_asset_ids:
-                continue
-            seen_asset_ids.add(link.asset_id)
-
-            asset = db.query(ContentAsset).filter(ContentAsset.id == link.asset_id).first()
-            if not asset or not asset.passport or asset.passport.status != "valid":
+    if expired_versions:
+        for fv in expired_versions:
+            fact = db.query(Fact).filter(Fact.id == fv.fact_id).first()
+            if not fact:
                 continue
 
-            asset.passport.status = "review_required"
-            asset.status = "needs_revalidation"
-            asset.updated_at = now
-
-            owner = db.query(User).filter(User.id == asset.creator_id).first()
-            owner_name = owner.name if owner else f"User {asset.creator_id}"
-
-            notification_msg = (
-                f"Fact '{fact.key}' expired on {fv.valid_until.strftime('%Y-%m-%d')}. "
-                f"Your approved asset '{asset.title}' requires revalidation."
+            links = (
+                db.query(AssetFactLink)
+                .filter(AssetFactLink.fact_version_id == fv.id)
+                .all()
             )
-            db.add(
-                Notification(
-                    user_id=asset.creator_id,
-                    message=notification_msg,
-                    asset_id=asset.id,
-                    read=False,
-                    created_at=now,
+
+            for link in links:
+                if link.asset_id in seen_asset_ids:
+                    continue
+                seen_asset_ids.add(link.asset_id)
+
+                asset = db.query(ContentAsset).filter(ContentAsset.id == link.asset_id).first()
+                if not asset or not asset.passport or asset.passport.status != "valid":
+                    continue
+
+                asset.passport.status = "review_required"
+                asset.status = "needs_revalidation"
+                asset.updated_at = now
+
+                owner = db.query(User).filter(User.id == asset.creator_id).first()
+                owner_name = owner.name if owner else f"User {asset.creator_id}"
+
+                # Only notify each owner once per fact version (no duplicate notifications)
+                existing_notif = (
+                    db.query(Notification)
+                    .filter(
+                        Notification.user_id == asset.creator_id,
+                        Notification.fact_version_id == fv.id,
+                    )
+                    .first()
                 )
-            )
+                if not existing_notif:
+                    notification_msg = (
+                        f"Fact '{fact.key}' expired on {fv.valid_until.strftime('%Y-%m-%d')}. "
+                        f"Your approved asset '{asset.title}' requires revalidation."
+                    )
+                    db.add(
+                        Notification(
+                            user_id=asset.creator_id,
+                            message=notification_msg,
+                            asset_id=asset.id,
+                            fact_version_id=fv.id,
+                            read=False,
+                            created_at=now,
+                        )
+                    )
 
-            db.add(
-                ActivityLog(
-                    org_id=fact.org_id,
-                    actor_id=actor_id,
-                    action="expired_fact_recall",
-                    entity="asset",
-                    entity_id=str(asset.id),
-                    detail={
-                        "fact_id": fact.id,
-                        "fact_key": fact.key,
-                        "expired_version": fv.version,
-                        "valid_until": fv.valid_until.isoformat(),
-                    },
-                    created_at=now,
+                db.add(
+                    ActivityLog(
+                        org_id=fact.org_id,
+                        actor_id=actor_id,
+                        action="expired_fact_recall",
+                        entity="asset",
+                        entity_id=str(asset.id),
+                        detail={
+                            "fact_id": fact.id,
+                            "fact_key": fact.key,
+                            "expired_version": fv.version,
+                            "valid_until": fv.valid_until.isoformat(),
+                        },
+                        created_at=now,
+                    )
                 )
-            )
 
-            sentence = find_matching_sentence(asset.body, fv.value, fact.key)
-            affected_items.append(
-                ImpactPreviewItem(
-                    asset_id=asset.id,
-                    title=asset.title,
-                    owner=owner_name,
-                    passport_code=asset.passport.id,
-                    old_value=fv.value,
-                    new_value="[EXPIRED]",
-                    matching_sentence=sentence,
-                    suggested_sentence=None,
+                sentence = find_matching_sentence(asset.body, fv.value, fact.key)
+                affected_items.append(
+                    ImpactPreviewItem(
+                        asset_id=asset.id,
+                        title=asset.title,
+                        owner=owner_name,
+                        passport_code=asset.passport.id,
+                        old_value=fv.value,
+                        new_value="[EXPIRED]",
+                        matching_sentence=sentence,
+                        suggested_sentence=None,
+                    )
                 )
-            )
 
+    expiry_run = ExpiryRun(
+        ran_at=now,
+        source=source,
+        affected_assets_count=len(affected_items),
+        details={"affected_asset_ids": [item.asset_id for item in affected_items]},
+    )
+    db.add(expiry_run)
     db.commit()
+
     return affected_items
