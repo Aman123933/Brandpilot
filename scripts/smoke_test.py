@@ -383,6 +383,197 @@ class SmokeTestRunner:
             return False
 
         # -------------------------------------------------------------
+        # STEP 9: Brand Git Draft (Create proposed guideline version)
+        # -------------------------------------------------------------
+        draft_v = None
+        try:
+            draft_payload = {
+                "body": "Smoke test updated guideline body",
+                "change_note": "Smoke test proposed rule update",
+                "activate": False,
+                "rules": {
+                    "banned_terms": [
+                        {"id": "BT-001", "term": "cheap", "why": "Undermines premium perception", "preferred": "affordable"},
+                        {"id": "BT-SMOKE", "term": "ordinary", "why": "Banned superlative", "preferred": "standard"},
+                    ],
+                    "required_phrases": [
+                        {"id": "RP-001", "phrase": "Kestrel One", "why": "Product name"}
+                    ],
+                    "tone_notes": ["confident", "plain"],
+                    "claim_rules": [],
+                },
+            }
+            draft_resp = self.session.post(
+                f"{self.base_url}/guidelines/1/versions",
+                json=draft_payload,
+                headers=self.auth_headers("brand_manager"),
+                timeout=10,
+            )
+            if draft_resp.status_code != 201:
+                self.log_fail("Brand Git draft creation", f"Status {draft_resp.status_code}: {draft_resp.text}")
+                return False
+
+            draft_v = draft_resp.json()["version"]
+            self.log_pass("Brand Git draft created", f"Draft version: v{draft_v}")
+        except Exception as exc:
+            self.log_fail("Brand Git draft creation", str(exc))
+            return False
+
+        # -------------------------------------------------------------
+        # STEP 10: Brand Git Semantic Diff
+        # -------------------------------------------------------------
+        try:
+            diff_resp = self.session.get(
+                f"{self.base_url}/guidelines/1/diff?from=1&to={draft_v}",
+                headers=self.auth_headers("brand_manager"),
+                timeout=10,
+            )
+            if diff_resp.status_code != 200:
+                self.log_fail("Brand Git diff", f"Status {diff_resp.status_code}: {diff_resp.text}")
+                return False
+
+            diff_data = diff_resp.json()
+            assert "summary" in diff_data, "Missing summary in diff"
+            assert "changes" in diff_data, "Missing changes in diff"
+            self.log_pass(
+                "Brand Git semantic diff computed",
+                f"Added: {diff_data['summary']['added']}, Removed: {diff_data['summary']['removed']}, "
+                f"Changed: {diff_data['summary']['changed']}",
+            )
+        except Exception as exc:
+            self.log_fail("Brand Git diff", str(exc))
+            return False
+
+        # -------------------------------------------------------------
+        # STEP 11: Brand Git Deterministic Replay
+        # -------------------------------------------------------------
+        try:
+            replay_resp = self.session.post(
+                f"{self.base_url}/guidelines/1/versions/{draft_v}/replay",
+                json={"scope": "all"},
+                headers=self.auth_headers("brand_manager"),
+                timeout=10,
+            )
+            if replay_resp.status_code != 200:
+                self.log_fail("Brand Git replay", f"Status {replay_resp.status_code}: {replay_resp.text}")
+                return False
+
+            replay_data = replay_resp.json()
+            assert "summary" in replay_data, "Missing summary in replay"
+            assert "assets_checked" in replay_data, "Missing assets_checked in replay"
+            self.log_pass(
+                "Brand Git deterministic replay ran successfully",
+                f"Assets checked: {replay_data['assets_checked']}, "
+                f"Newly noncompliant: {replay_data['summary']['assets_newly_noncompliant']}",
+            )
+        except Exception as exc:
+            self.log_fail("Brand Git replay", str(exc))
+            return False
+
+        # -------------------------------------------------------------
+        # STEP 12: Brand Git Activate Version
+        # -------------------------------------------------------------
+        try:
+            act_resp = self.session.post(
+                f"{self.base_url}/guidelines/1/versions/{draft_v}/activate",
+                json={"note": "Smoke test activation"},
+                headers=self.auth_headers("brand_manager"),
+                timeout=10,
+            )
+            if act_resp.status_code != 200:
+                self.log_fail("Brand Git activate", f"Status {act_resp.status_code}: {act_resp.text}")
+                return False
+
+            act_data = act_resp.json()
+            assert act_data["status"] == "active", f"Expected active status, got {act_data['status']}"
+            self.log_pass("Brand Git version activated", f"Version v{draft_v} is now active")
+        except Exception as exc:
+            self.log_fail("Brand Git activate", str(exc))
+            return False
+
+        # -------------------------------------------------------------
+        # STEP 13: Insights Overview & Violations
+        # -------------------------------------------------------------
+        try:
+            ins_resp = self.session.get(
+                f"{self.base_url}/insights/overview",
+                headers=self.auth_headers("brand_manager"),
+                timeout=10,
+            )
+            if ins_resp.status_code != 200:
+                self.log_fail("Insights overview", f"Status {ins_resp.status_code}: {ins_resp.text}")
+                return False
+
+            ins_data = ins_resp.json()
+            assert "totals" in ins_data, "Missing totals in insights overview"
+            assert "compliance_rate" in ins_data, "Missing compliance_rate"
+
+            viol_resp = self.session.get(
+                f"{self.base_url}/insights/violations?days=30",
+                headers=self.auth_headers("brand_manager"),
+                timeout=10,
+            )
+            assert viol_resp.status_code == 200, f"Violations status: {viol_resp.status_code}"
+
+            self.log_pass(
+                "Insights overview & violations fetched",
+                f"Total assets: {ins_data['totals']['assets']}, "
+                f"Approved: {ins_data['totals']['approved_valid']}, "
+                f"Compliance rate: {ins_data['compliance_rate']}%",
+            )
+        except Exception as exc:
+            self.log_fail("Insights overview & violations", str(exc))
+            return False
+
+        # -------------------------------------------------------------
+        # STEP 14: Expiry Status
+        # -------------------------------------------------------------
+        try:
+            exp_resp = self.session.get(
+                f"{self.base_url}/admin/expiry-status",
+                headers=self.auth_headers("brand_manager"),
+                timeout=10,
+            )
+            if exp_resp.status_code != 200:
+                self.log_fail("Expiry status", f"Status {exp_resp.status_code}: {exp_resp.text}")
+                return False
+
+            exp_data = exp_resp.json()
+            assert "last_run_at" in exp_data, "Missing last_run_at in expiry status"
+            assert "interval_minutes" in exp_data, "Missing interval_minutes in expiry status"
+            self.log_pass(
+                "Admin expiry status retrieved",
+                f"Interval: {exp_data['interval_minutes']}m, Source: {exp_data.get('last_run_source')}",
+            )
+        except Exception as exc:
+            self.log_fail("Expiry status", str(exc))
+            return False
+
+        # -------------------------------------------------------------
+        # STEP 15: Passport Withdrawal (with required reason)
+        # -------------------------------------------------------------
+        try:
+            w_resp = self.session.post(
+                f"{self.base_url}/passports/{passport_code}/withdraw",
+                json={"reason": "Superceded by upcoming campaign"},
+                headers=self.auth_headers("brand_manager"),
+                timeout=10,
+            )
+            if w_resp.status_code != 200:
+                self.log_fail("Passport withdrawal", f"Status {w_resp.status_code}: {w_resp.text}")
+                return False
+
+            w_data = w_resp.json()
+            assert w_data.get("status") == "withdrawn", f"Expected status 'withdrawn', got {w_data.get('status')}"
+            self.log_pass(
+                "Passport withdrawn with required reason",
+                f"Passport: {passport_code}, Status: {w_data['status'].upper()}",
+            )
+        except Exception as exc:
+            self.log_fail("Passport withdrawal", str(exc))
+            return False
+
+        # -------------------------------------------------------------
         # FINAL REPORT
         # -------------------------------------------------------------
         print("\n" + "=" * 65)
