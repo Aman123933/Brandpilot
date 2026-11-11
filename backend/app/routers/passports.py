@@ -20,6 +20,7 @@ from backend.app.schemas import (
     PublicPassportOut,
     FullPassportOut,
     AssetRevisionOut,
+    WithdrawPassportRequest,
 )
 from backend.app.auth import get_current_user, require_roles
 
@@ -95,8 +96,8 @@ def get_full_passport(
     asset = passport.asset
     if asset.org_id != current_user.org_id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access forbidden to passport outside your organization",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Passport with code '{code}' not found",
         )
 
     approver_name = passport.approver.name if passport.approver else None
@@ -182,6 +183,8 @@ def get_full_passport(
             "created_at": log.created_at.isoformat(),
         })
 
+    withdrawn_by_name = passport.withdrawn_by_user.name if passport.withdrawn_by_user else None
+
     return FullPassportOut(
         code=passport.id,
         asset_id=asset.id,
@@ -191,6 +194,9 @@ def get_full_passport(
         approved_at=passport.approved_at,
         approved_by_name=approver_name,
         ai_disclosure=passport.ai_disclosure,
+        withdrawn_reason=passport.withdrawn_reason,
+        withdrawn_at=passport.withdrawn_at,
+        withdrawn_by=withdrawn_by_name,
         created_at=passport.created_at,
         guideline_version=guideline_data,
         referenced_facts=facts_data,
@@ -230,6 +236,7 @@ def get_passport_qr_code(code: str, db: Session = Depends(get_db)):
 @router.post("/{code}/withdraw", response_model=PublicPassportOut)
 def withdraw_passport(
     code: str,
+    req: WithdrawPassportRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles("brand_manager")),
 ):
@@ -244,12 +251,22 @@ def withdraw_passport(
     asset = passport.asset
     if asset.org_id != current_user.org_id:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access forbidden to passport outside your organization",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Passport with code '{code}' not found",
+        )
+
+    if passport.status == "withdrawn":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Passport is already withdrawn",
         )
 
     now = datetime.now(timezone.utc)
     passport.status = "withdrawn"
+    passport.withdrawn_reason = req.reason
+    passport.withdrawn_at = now
+    passport.withdrawn_by = current_user.id
+
     asset.status = "rejected"
     asset.updated_at = now
 
@@ -260,7 +277,7 @@ def withdraw_passport(
             action="passport_withdrawn",
             entity="passport",
             entity_id=code,
-            detail={"asset_id": asset.id},
+            detail={"asset_id": asset.id, "reason": req.reason},
             created_at=now,
         )
     )
