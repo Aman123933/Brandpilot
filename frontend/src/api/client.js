@@ -75,6 +75,7 @@ export async function apiFetch(endpoint, options = {}, isRetry = false) {
       localStorage.removeItem('brandpilot_token')
       localStorage.removeItem('brandpilot_user')
       window.dispatchEvent(new CustomEvent('brandpilot:auth-expired'))
+      window.dispatchEvent(new CustomEvent('brandpilot:session-expired'))
       const errorJson = await response.json().catch(() => ({}))
       const msg = errorJson.detail || 'Your session expired. Please sign in again.'
       throw new ApiError(msg, 401, errorJson.detail, errorJson)

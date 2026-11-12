@@ -81,7 +81,11 @@ export function AuthProvider({ children }) {
       logout('Your session expired. Please sign in again.')
     }
     window.addEventListener('brandpilot:auth-expired', handleExpired)
-    return () => window.removeEventListener('brandpilot:auth-expired', handleExpired)
+    window.addEventListener('brandpilot:session-expired', handleExpired)
+    return () => {
+      window.removeEventListener('brandpilot:auth-expired', handleExpired)
+      window.removeEventListener('brandpilot:session-expired', handleExpired)
+    }
   }, [logout])
 
   const value = {

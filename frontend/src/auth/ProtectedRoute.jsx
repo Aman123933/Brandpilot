@@ -42,10 +42,10 @@ export function ProtectedRoute({ children, requiredRole = null, requiredConditio
     return (
       <main className="forbidden-screen">
         <div className="forbidden-box">
-          <p className="eyebrow" style={{ color: 'var(--vermilion)' }}>NOT AVAILABLE</p>
-          <h2 className="display-font">Not available for your role</h2>
+          <p className="eyebrow" style={{ color: 'var(--vermilion)' }}>ACCESS RESTRICTED</p>
+          <h2 className="display-font">Access Restricted</h2>
           <p>
-            This view is restricted to governance roles. Content Creators do not have access to organizational insights.
+            Governance insights and organizational compliance analytics are restricted to Brand Managers and Reviewers.
           </p>
           <a href="/app/overview" className="action-button primary" style={{ marginTop: '16px', display: 'inline-block' }}>
             Return to Overview

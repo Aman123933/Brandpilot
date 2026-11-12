@@ -107,7 +107,7 @@ export function PassportDetailPage() {
           <div className="breadcrumb-nav mono-font">
             <Link to="/app/overview">WORKSPACE</Link> / <span>PASSPORT {passport.code}</span>
           </div>
-          <h1 className="display-font">Brand Passport Detail</h1>
+          <h1 className="display-font">Brand Trust Passport Detail</h1>
           <p className="page-subtitle">
             Authenticated governance certificate, provenance record, and linked ground-truth dependency tree.
           </p>
@@ -285,9 +285,9 @@ export function PassportDetailPage() {
       <Modal
         isOpen={showWithdrawModal}
         onClose={() => setShowWithdrawModal(false)}
-        title={`Withdraw Passport ${code}`}
+        title={`Withdraw Trust Passport ${code}`}
       >
-        <form onSubmit={handleWithdrawSubmit} className="editorial-form">
+        <form onSubmit={handleWithdrawSubmit} className="editorial-form" noValidate>
           <p className="reject-warning">
             Withdrawing a passport revokes its public verification status. This action is permanently recorded in the governance audit trail.
           </p>

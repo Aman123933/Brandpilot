@@ -57,7 +57,7 @@ export function InsightsPage() {
       <main className="page-container">
         <div className="forbidden-box">
           <p className="eyebrow" style={{ color: 'var(--vermilion)' }}>ACCESS RESTRICTED</p>
-          <h1 className="display-font">Not available for your role</h1>
+          <h2 className="display-font">Access Restricted</h2>
           <p>
             Governance insights and organizational compliance analytics are restricted to Brand Managers and Reviewers.
           </p>
@@ -211,7 +211,7 @@ export function InsightsPage() {
           </section>
 
           {/* Asset Compliance Table */}
-          <section className="insights-section-card" aria-labelledby="asset-compliance-title">
+          <section className="insights-section-card compliance-breakdown-card" aria-labelledby="asset-compliance-title">
             <div className="card-header-row">
               <div>
                 <span className="mono-font eyebrow">FLEET INVENTORY</span>

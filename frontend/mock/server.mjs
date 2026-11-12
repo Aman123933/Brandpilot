@@ -327,7 +327,7 @@ function createInitialState() {
           created_at: '2026-10-15T14:30:00Z',
         },
       ],
-      passport_code: 'BP-8K2Q-9A',
+      passport_code: 'BP-2026-9041',
       created_at: '2026-10-15T11:00:00Z',
     },
     {
@@ -424,7 +424,7 @@ function createInitialState() {
   const passports = [
     {
       id: 1,
-      code: 'BP-8K2Q-9A',
+      code: 'BP-2026-9041',
       asset_id: 1,
       status: 'valid',
       approved_by: 3,
@@ -458,7 +458,7 @@ function createInitialState() {
     {
       id: 1,
       user_id: 1,
-      message: 'Passport BP-8K2Q-9A was issued for Kestrel One Launch Announcement.',
+      message: 'Passport BP-2026-9041 was issued for Kestrel One Launch Announcement.',
       asset_id: 1,
       read: false,
       created_at: '2026-10-15T15:00:00Z',
@@ -1010,7 +1010,7 @@ const server = http.createServer(async (req, res) => {
             asset_id: 1,
             title: db.assets[0]?.title || 'Kestrel One Launch Announcement',
             status: 'approved',
-            passport_code: 'BP-8K2Q-9A',
+            passport_code: 'BP-2026-9041',
             rule_id: 'BT-004',
             quote: 'wireless',
             severity: 'high',
@@ -1182,7 +1182,48 @@ const server = http.createServer(async (req, res) => {
     const asset = db.assets.find(a => a.id === assetId)
     if (!asset) return sendJson(res, 404, { detail: 'Asset not found' })
 
-    const assetFindings = db.findings.filter(f => f.asset_id === assetId)
+    let assetFindings = db.findings.filter(f => f.asset_id === assetId)
+    if (assetFindings.length === 0) {
+      const bodyLower = (asset.body || '').toLowerCase()
+      if (bodyLower.includes('cheap')) {
+        const f = {
+          id: db.nextFindingId++,
+          asset_id: assetId,
+          revision: asset.current_revision,
+          kind: 'rule_violation',
+          severity: 'high',
+          quote: 'cheap',
+          explanation: "Banned term 'cheap' violates brand voice rule BT-001.",
+          suggestion: 'accessible',
+          source_type: 'guideline',
+          rule_id: 'BT-001',
+          status: 'open',
+          origin: 'rules',
+          created_at: new Date().toISOString(),
+        }
+        db.findings.push(f)
+        assetFindings.push(f)
+      }
+      if (bodyLower.includes('best')) {
+        const f = {
+          id: db.nextFindingId++,
+          asset_id: assetId,
+          revision: asset.current_revision,
+          kind: 'rule_violation',
+          severity: 'high',
+          quote: 'best',
+          explanation: "Unsubstantiated superlative 'best' requires verified benchmark.",
+          suggestion: 'finely tuned',
+          source_type: 'guideline',
+          rule_id: 'CR-001',
+          status: 'open',
+          origin: 'rules',
+          created_at: new Date().toISOString(),
+        }
+        db.findings.push(f)
+        assetFindings.push(f)
+      }
+    }
 
     if (simulateAiDown) {
       return sendJson(res, 200, {

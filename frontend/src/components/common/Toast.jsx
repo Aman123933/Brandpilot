@@ -31,7 +31,7 @@ export function ToastProvider({ children }) {
         {toasts.map(toast => (
           <div
             key={toast.id}
-            className={`toast-item toast-${toast.type}`}
+            className={`toast-item toast toast-${toast.type}`}
             role="status"
           >
             <span className="toast-text">{toast.message}</span>

@@ -76,7 +76,7 @@ export function SvgLineChart({
             onClick={() => setShowTableFallback(prev => !prev)}
             aria-expanded={showTableFallback}
           >
-            {showTableFallback ? 'Show Chart' : 'Show Data Table'}
+            {showTableFallback ? 'Show Visual Chart' : 'Show Data Table'}
           </button>
         </div>
       </div>
@@ -85,7 +85,7 @@ export function SvgLineChart({
         <div className="svg-wrapper" role="img" aria-label={title}>
           <svg
             viewBox={`0 0 ${width} ${height}`}
-            className="line-chart-svg"
+            className="line-chart-svg brand-svg-chart"
             width="100%"
             preserveAspectRatio="xMidYMid meet"
           >
@@ -172,7 +172,7 @@ export function SvgLineChart({
         </div>
       ) : (
         <div className="table-fallback-wrapper">
-          <table className="editorial-table" aria-label={title}>
+          <table className="editorial-table chart-fallback-table" aria-label={title}>
             <thead>
               <tr>
                 <th scope="col">Date</th>

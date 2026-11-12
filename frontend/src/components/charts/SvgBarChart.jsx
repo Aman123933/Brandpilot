@@ -25,7 +25,7 @@ export function SvgBarChart({ data = [], title = 'Top Violated Rules' }) {
           onClick={() => setShowTableFallback(prev => !prev)}
           aria-expanded={showTableFallback}
         >
-          {showTableFallback ? 'Show Chart' : 'Show Data Table'}
+          {showTableFallback ? 'Show Visual Chart' : 'Show Data Table'}
         </button>
       </div>
 
@@ -33,7 +33,7 @@ export function SvgBarChart({ data = [], title = 'Top Violated Rules' }) {
         <div className="svg-wrapper" role="img" aria-label={title}>
           <svg
             viewBox={`0 0 ${chartWidth} ${data.length * (barHeight + gap) + 30}`}
-            className="bar-chart-svg"
+            className="bar-chart-svg brand-svg-chart"
             width="100%"
             preserveAspectRatio="xMidYMid meet"
           >
@@ -80,7 +80,7 @@ export function SvgBarChart({ data = [], title = 'Top Violated Rules' }) {
         </div>
       ) : (
         <div className="table-fallback-wrapper">
-          <table className="editorial-table" aria-label={title}>
+          <table className="editorial-table chart-fallback-table" aria-label={title}>
             <thead>
               <tr>
                 <th scope="col">Rule / Term</th>

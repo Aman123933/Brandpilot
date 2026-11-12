@@ -79,7 +79,7 @@ export function Modal({
       }}
     >
       <div
-        className="modal-card"
+        className="modal-card modal-dialog"
         ref={modalRef}
         role="dialog"
         aria-modal="true"

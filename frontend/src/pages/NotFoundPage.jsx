@@ -10,9 +10,9 @@ export function NotFoundPage() {
         <span className="mono-font eyebrow" style={{ color: 'var(--vermilion)' }}>
           404 / NOT FOUND
         </span>
-        <h1 className="display-font">This page is not on the desk.</h1>
+        <h1 className="display-font">404: Page Not Found</h1>
         <p>
-          The link or path you entered does not exist in BrandPilot.
+          The page you are looking for does not exist on the BrandPilot desk.
         </p>
 
         <div style={{ marginTop: '24px' }}>
@@ -20,7 +20,7 @@ export function NotFoundPage() {
             to={currentUser ? '/app/overview' : '/login'}
             className="action-button primary"
           >
-            {currentUser ? 'Return to Workspace Overview' : 'Go to Sign In'}
+            {currentUser ? 'Return to Overview' : 'Go to Sign In'}
           </Link>
         </div>
       </div>

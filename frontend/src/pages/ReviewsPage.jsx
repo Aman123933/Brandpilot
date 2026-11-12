@@ -147,7 +147,7 @@ export function ReviewsPage() {
                   <button
                     key={item.id}
                     type="button"
-                    className={`queue-item-card ${isSelected ? 'selected' : ''}`}
+                    className={`queue-item-card review-queue-card ${isSelected ? 'selected' : ''}`}
                     onClick={() => selectAsset(item.id)}
                   >
                     <div className="queue-card-top">

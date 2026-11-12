@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 import { assetsApi } from '../api/client'
 import { formatDate } from '../utils/formatters'
@@ -15,6 +15,7 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5 MB
 export function AssetsPage() {
   const { isCreator, isManager } = useAuth()
   const { addToast } = useToast()
+  const navigate = useNavigate()
 
   const [assets, setAssets] = useState([])
   const [loading, setLoading] = useState(true)
@@ -73,7 +74,7 @@ export function AssetsPage() {
     setCreatingDraft(true)
     setDraftError('')
     try {
-      await assetsApi.create({
+      const created = await assetsApi.create({
         title: draftTitle.trim(),
         body: draftBody.trim(),
       })
@@ -81,7 +82,11 @@ export function AssetsPage() {
       setShowCreateModal(false)
       setDraftTitle('')
       setDraftBody('')
-      await refreshAssets()
+      if (created?.id) {
+        navigate(`/app/assets/${created.id}`)
+      } else {
+        await refreshAssets()
+      }
     } catch (err) {
       setDraftError(err.message || 'Failed to create asset draft.')
     } finally {
@@ -149,12 +154,16 @@ export function AssetsPage() {
     formData.append('file', selectedFile)
 
     try {
-      await assetsApi.upload(formData)
+      const created = await assetsApi.upload(formData)
       addToast(`Document '${uploadTitle}' uploaded and parsed as Revision 1.`, 'success')
       setShowUploadModal(false)
       setUploadTitle('')
       setSelectedFile(null)
-      await refreshAssets()
+      if (created?.id) {
+        navigate(`/app/assets/${created.id}`)
+      } else {
+        await refreshAssets()
+      }
     } catch (err) {
       setUploadError(err.message || 'Failed to upload document.')
     } finally {
