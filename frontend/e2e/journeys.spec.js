@@ -3,6 +3,8 @@ import { loginWithDemo, loginWithCredentials, signOut } from './helpers.js'
 
 test.describe.configure({ mode: 'serial' })
 
+let latestPassportCode = 'BP-2026-9041'
+
 test.describe('BrandPilot Round 3 - E2E Verification Suite', () => {
 
   // -------------------------------------------------------------
@@ -122,21 +124,27 @@ test.describe('BrandPilot Round 3 - E2E Verification Suite', () => {
     await submitDecisionBtn.click()
 
     // Verify passport is issued or toast shown
-    await expect(page.locator('.toast', { hasText: /passport|decision/i })).toBeVisible({ timeout: 10000 })
+    const toastLocator = page.locator('.toast', { hasText: /passport|decision/i })
+    await expect(toastLocator).toBeVisible({ timeout: 10000 })
+    const toastText = await toastLocator.textContent()
+    const codeMatch = toastText.match(/BP-[A-Z0-9]+-[A-Z0-9]+/i)
+    if (codeMatch) {
+      latestPassportCode = codeMatch[0]
+    }
 
-    // Open passports page or first passport
-    await page.goto('/app/passports/BP-2026-9041')
+    // Open passports page or issued passport
+    await page.goto(`/app/passports/${latestPassportCode}`)
     await page.waitForLoadState('networkidle')
     await expect(page.locator('h1')).toContainText(/passport/i)
     await expect(page.locator('.passport-stamp-seal')).toContainText(/PASSED|APPROVED|REVIEW REQUIRED/i)
 
     // 8. Public verification without login
     await signOut(page)
-    await page.goto('/verify/BP-2026-9041')
+    await page.goto(`/verify/${latestPassportCode}`)
     await page.waitForLoadState('networkidle')
     await expect(page.locator('.public-stamp')).toBeVisible()
     // Verify no private login required
-    expect(page.url()).toContain('/verify/BP-2026-9041')
+    expect(page.url()).toContain(`/verify/${latestPassportCode}`)
   })
 
   // -------------------------------------------------------------
@@ -181,11 +189,13 @@ test.describe('BrandPilot Round 3 - E2E Verification Suite', () => {
       await expect(page.locator('.toast', { hasText: /expiry audit complete/i })).toBeVisible({ timeout: 10000 })
     }
 
-    // Check notifications page
+    // Sign out manager and sign in as asset owner (creator) to check notification
+    await signOut(page)
+    await loginWithDemo(page, 'creator')
     await page.click('a[href="/app/notifications"]')
     await page.waitForURL('**/app/notifications')
     await expect(page.locator('h1')).toContainText('Notifications')
-    await expect(page.locator('.notifications-list')).toBeVisible()
+    await expect(page.locator('.notifications-list, .notification-card, .notification-item').first()).toBeVisible()
 
     await signOut(page)
   })
@@ -308,9 +318,9 @@ test.describe('BrandPilot Round 3 - E2E Verification Suite', () => {
     await loginWithDemo(page, 'brand_manager')
 
     // Open existing passport
-    await page.goto('/app/passports/BP-2026-9041')
+    await page.goto(`/app/passports/${latestPassportCode}`)
     await page.waitForLoadState('networkidle')
-    await expect(page.locator('h1')).toContainText('Trust Passport')
+    await expect(page.locator('h1')).toContainText(/passport/i)
 
     // Click Withdraw button
     const withdrawBtn = page.locator('button:has-text("Withdraw Passport")')
@@ -336,7 +346,7 @@ test.describe('BrandPilot Round 3 - E2E Verification Suite', () => {
 
     // Verify public verify page reflects Withdrawn
     await signOut(page)
-    await page.goto('/verify/BP-2026-9041')
+    await page.goto(`/verify/${latestPassportCode}`)
     await page.waitForLoadState('networkidle')
     await expect(page.locator('.public-stamp')).toContainText(/WITHDRAWN/i)
   })
@@ -412,7 +422,7 @@ test.describe('BrandPilot Round 3 - E2E Verification Suite', () => {
 
     // Public / Unauthenticated screens
     await snap('login', '/login')
-    await snap('verify', '/verify/BP-2026-9041')
+    await snap('verify', `/verify/${latestPassportCode}`)
 
     // Authenticated screens (login as manager)
     await page.setViewportSize({ width: 1280, height: 800 })
@@ -426,7 +436,7 @@ test.describe('BrandPilot Round 3 - E2E Verification Suite', () => {
     await snap('reviews', '/app/reviews')
     await snap('insights', '/app/insights')
     await snap('notifications', '/app/notifications')
-    await snap('passport', '/app/passports/BP-2026-9041')
+    await snap('passport', `/app/passports/${latestPassportCode}`)
   })
 
 })

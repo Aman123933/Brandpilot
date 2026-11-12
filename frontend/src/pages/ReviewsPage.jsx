@@ -43,10 +43,20 @@ export function ReviewsPage() {
     }
   }, [])
 
+  const normalizeQueueItem = item => ({
+    ...item,
+    id: item.id ?? item.asset_id,
+    asset_id: item.asset_id ?? item.id,
+    open_high_findings: item.open_high_findings ?? item.high_severity_findings_count ?? 0,
+    open_total_findings: item.open_total_findings ?? item.open_findings_count ?? 0,
+    submitted_at: item.submitted_at || item.created_at,
+  })
+
   const loadQueue = useCallback(async () => {
     try {
-      const data = await reviewsApi.getQueue()
-      setQueue(Array.isArray(data) ? data : [])
+      const raw = await reviewsApi.getQueue()
+      const data = (Array.isArray(raw) ? raw : []).map(normalizeQueueItem)
+      setQueue(data)
       if (data && data.length > 0 && !selectedAssetId) {
         selectAsset(data[0].id)
       }
@@ -61,9 +71,10 @@ export function ReviewsPage() {
     let mounted = true
     async function initQueue() {
       try {
-        const data = await reviewsApi.getQueue()
+        const raw = await reviewsApi.getQueue()
         if (mounted) {
-          setQueue(Array.isArray(data) ? data : [])
+          const data = (Array.isArray(raw) ? raw : []).map(normalizeQueueItem)
+          setQueue(data)
           if (data && data.length > 0) {
             selectAsset(data[0].id)
           }
@@ -142,13 +153,14 @@ export function ReviewsPage() {
 
             <div className="queue-items-list">
               {queue.map(item => {
-                const isSelected = item.id === selectedAssetId
+                const itemId = item.id ?? item.asset_id
+                const isSelected = itemId === selectedAssetId
                 return (
                   <button
-                    key={item.id}
+                    key={itemId}
                     type="button"
                     className={`queue-item-card review-queue-card ${isSelected ? 'selected' : ''}`}
-                    onClick={() => selectAsset(item.id)}
+                    onClick={() => selectAsset(itemId)}
                   >
                     <div className="queue-card-top">
                       <strong className="queue-card-title">{item.title}</strong>
@@ -281,7 +293,14 @@ export function ReviewsPage() {
                 </form>
               </div>
             ) : (
-              <p className="card-empty">Select a submission from the queue on the left to begin review.</p>
+              <div>
+                {decisionError && (
+                  <div className="alert-box alert-vermilion" role="alert" style={{ marginBottom: '12px' }}>
+                    {decisionError}
+                  </div>
+                )}
+                <p className="card-empty">Select a submission from the queue on the left to begin review.</p>
+              </div>
             )}
           </section>
         </div>
