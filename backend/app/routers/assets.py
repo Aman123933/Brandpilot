@@ -284,7 +284,6 @@ def get_asset(
         passport_code=asset.passport.id if asset.passport else None,
         passport_status=asset.passport.status if asset.passport else None,
         revisions=revisions_out,
-        revisions=revisions_out,
     )
 
 
