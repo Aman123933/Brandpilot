@@ -17,12 +17,12 @@ services:
       - key: GEMINI_TIMEOUT_SECONDS
         value: "30"
       - key: SECRET_KEY
-        generateValue: true
+        value: 6e351048c096998eb8d5fddd5ebc46826554c4f8f3463a2bb43051a5a2c5a194
       - key: PUBLIC_BASE_URL
         sync: false
       - key: DEMO_MODE
         value: "true"
       - key: CRON_SECRET
-        generateValue: true
+        value: wr32esaqpghck4ymz17ud6jbvtxl05of
       - key: EXPIRY_CHECK_INTERVAL_MINUTES
         value: "60"

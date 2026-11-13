@@ -32,6 +32,8 @@ class Settings(BaseSettings):
             return "sqlite:///./brandpilot.db"
 
         url = self.DATABASE_URL.strip()
+        if url.startswith("postgresql+psycopg://"):
+            url = url.replace("postgresql+psycopg://", "postgresql://", 1)
         if url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql://", 1)
         if "supabase.co" in url and "sslmode=" not in url:
