@@ -315,6 +315,8 @@ class ContentAssetOut(BaseModel):
 
 class ContentAssetDetailOut(ContentAssetOut):
     revisions: List[AssetRevisionOut] = Field(default_factory=list)
+    passport_code: Optional[str] = None
+    passport_status: Optional[str] = None
 
 
 class AiHealthInfo(BaseModel):

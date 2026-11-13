@@ -281,6 +281,9 @@ def get_asset(
         current_revision=asset.current_revision,
         created_at=asset.created_at,
         updated_at=asset.updated_at,
+        passport_code=asset.passport.id if asset.passport else None,
+        passport_status=asset.passport.status if asset.passport else None,
+        revisions=revisions_out,
         revisions=revisions_out,
     )
 
